@@ -13,6 +13,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
+  metadataBase: new URL("https://land.zihado.com"),
   title: "실거래 대시보드 · 전국 아파트 매매",
   description: "국토교통부 실거래가 공개시스템 기반 전국 아파트 실거래 대시보드",
 };
@@ -24,7 +25,7 @@ export default function RootLayout({
 }>) {
   return (
     <html
-      lang="en"
+      lang="ko"
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
       <body className="min-h-full bg-[#0b1120] text-slate-100 antialiased">{children}</body>
