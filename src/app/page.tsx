@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   fetchOverview,
   fetchAptMap,
+  fetchRecent,
   shiftMonth,
   ymdOf,
   type RegionRow,
@@ -53,6 +54,7 @@ export default function Home() {
   const [data, setData] = useState<OverviewResponse | null>(null);
   const [allTotals, setAllTotals] = useState<OverviewResponse["totals"] | null>(null);
   const [prevData, setPrevData] = useState<OverviewResponse | null>(null);
+  const [newByRegion, setNewByRegion] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [selectedSido, setSelectedSido] = useState<string | null>(null);
@@ -122,6 +124,23 @@ export default function Home() {
     return () => { alive = false; };
   }, [yyyymm, scope, dataset]);
 
+  // 최근 신규 신고 거래(계약일 최신순) → 지역별 카운트 → '갱신 지역' glow 용
+  useEffect(() => {
+    let alive = true;
+    setNewByRegion({});
+    fetchRecent(yyyymm, "all", dataset, 300)
+      .then((r) => {
+        if (!alive) return;
+        const m: Record<string, number> = {};
+        for (const d of r.deals) {
+          if (d.sggCd) m[d.sggCd] = (m[d.sggCd] ?? 0) + 1;
+        }
+        setNewByRegion(m);
+      })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, [yyyymm, dataset]);
+
   // scope/시도/월 변경 시 드릴다운·단지레이어 초기화 (selectedSido 는 칩이 제어)
   useEffect(() => {
     setDetail(null);
@@ -144,6 +163,16 @@ export default function Home() {
   }, []);
 
   const regions = data?.regions ?? [];
+
+  // 시도별 신규 거래 합계 (전국 뷰의 시도 카드 glow 용)
+  const newBySido = useMemo(() => {
+    const m: Record<string, number> = {};
+    for (const r of regions) {
+      const n = newByRegion[r.sggCd];
+      if (n) m[r.sido] = (m[r.sido] ?? 0) + n;
+    }
+    return m;
+  }, [regions, newByRegion]);
 
   const cards: CardData[] = useMemo(() => {
     if (scope === "seoul") return regions.map(toGuCard);
@@ -618,6 +647,7 @@ export default function Home() {
                     data={card}
                     rank={i + 1}
                     maxInSet={maxInSet}
+                    newCount={card.isSido ? (newBySido[card.title] ?? 0) : (newByRegion[card.key] ?? 0)}
                     onClick={() =>
                       card.isSido
                         ? setSelectedSido(card.title)

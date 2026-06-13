@@ -39,6 +39,7 @@ export function ComplexDetail({
   const [coord, setCoord] = useState<{ lat: number; lng: number } | null>(null);
   const [nearby, setNearby] = useState<Nearby | null>(null);
   const [parcel, setParcel] = useState<Parcel | null>(null);
+  const [selectedBand, setSelectedBand] = useState<number | null>(null); // 선택 평형(ROUND㎡), null=전체
 
   useEffect(() => {
     let alive = true;
@@ -46,6 +47,7 @@ export function ComplexDetail({
     setCoord(null);
     setNearby(null);
     setParcel(null);
+    setSelectedBand(null);
     fetchComplexDeals(region, apt, shiftMonth(yyyymm, -11), yyyymm, dataset)
       .then((d) => alive && setDeals(d))
       .finally(() => alive && setLoading(false));
@@ -91,10 +93,31 @@ export function ComplexDetail({
     return () => window.removeEventListener("keydown", h);
   }, [onClose]);
 
-  // 월별 평균 시계열 (면적 혼재로 들쭉날쭉한 것 방지)
+  // 평형(전용면적 ROUND㎡) 목록 + 선택 평형 필터
+  const bands = useMemo(() => {
+    const m = new Map<number, { count: number; sumArea: number }>();
+    for (const d of deals) {
+      const b = Math.round(d.area);
+      if (!b) continue;
+      const e = m.get(b) ?? { count: 0, sumArea: 0 };
+      e.count += 1;
+      e.sumArea += d.area;
+      m.set(b, e);
+    }
+    return [...m.entries()]
+      .map(([band, e]) => ({ band, count: e.count, area: e.sumArea / e.count }))
+      .sort((a, b) => a.band - b.band);
+  }, [deals]);
+
+  const filteredDeals = useMemo(
+    () => (selectedBand == null ? deals : deals.filter((d) => Math.round(d.area) === selectedBand)),
+    [deals, selectedBand]
+  );
+
+  // 월별 평균 시계열 (선택 평형 기준 — 면적 혼재로 들쭉날쭉한 것 방지)
   const series = useMemo(() => {
     const byMonth = new Map<string, { sum: number; n: number }>();
-    for (const d of deals) {
+    for (const d of filteredDeals) {
       const v = d.dealAmount || d.deposit;
       if (!v) continue;
       const m = d.dealDate.slice(0, 7);
@@ -170,21 +193,21 @@ export function ComplexDetail({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [nearby]);
 
-  const reversedDeals = useMemo(() => [...deals].reverse(), [deals]);
+  const reversedDeals = useMemo(() => [...filteredDeals].reverse(), [filteredDeals]);
 
   const info = useMemo(() => {
-    if (deals.length === 0) return null;
-    const valued = deals.filter((d) => d.dealAmount || d.deposit);
+    if (filteredDeals.length === 0) return null;
+    const valued = filteredDeals.filter((d) => d.dealAmount || d.deposit);
     const amts = valued.map((d) => d.dealAmount || d.deposit);
-    const last = deals[deals.length - 1];
+    const last = filteredDeals[filteredDeals.length - 1];
     const peak = Math.max(...amts);
     const peakDeal = valued.find((d) => (d.dealAmount || d.deposit) === peak) ?? last;
     const avg = amts.length ? Math.round(amts.reduce((s, v) => s + v, 0) / amts.length) : 0;
-    const buildYear = deals.find((d) => d.buildYear)?.buildYear ?? 0;
+    const buildYear = filteredDeals.find((d) => d.buildYear)?.buildYear ?? 0;
     // 면적(평) 종류
-    const areas = [...new Set(deals.map((d) => Math.round(d.area)))].sort((a, b) => a - b);
+    const areas = [...new Set(filteredDeals.map((d) => Math.round(d.area)))].sort((a, b) => a - b);
     return {
-      count: deals.length,
+      count: filteredDeals.length,
       last,
       peak,
       peakDate: peakDeal.dealDate,
@@ -193,7 +216,7 @@ export function ComplexDetail({
       areas,
       latest: last.dealAmount || last.deposit,
     };
-  }, [deals]);
+  }, [filteredDeals]);
 
   return (
     <div
@@ -224,6 +247,29 @@ export function ComplexDetail({
             ✕
           </button>
         </div>
+
+        {/* 평형(전용면적) 선택 — 선택 시 요약·추이·표가 해당 평형만 */}
+        {bands.length > 1 && (
+          <div className="mb-4 flex flex-wrap gap-1.5">
+            {[{ band: null as number | null, count: deals.length, label: "전체" },
+              ...bands.map((b) => ({ band: b.band as number | null, count: b.count, label: `${b.band}㎡·${Math.round(b.area / 3.305785)}평` }))
+            ].map((b) => {
+              const active = selectedBand === b.band;
+              return (
+                <button
+                  key={b.band ?? "all"}
+                  onClick={() => setSelectedBand(b.band)}
+                  className={`rounded-full px-3 py-1.5 text-xs font-semibold transition ${
+                    active ? "bg-blue-600 text-white" : "bg-slate-800/60 text-slate-300 hover:bg-slate-700"
+                  }`}
+                >
+                  {b.label}{" "}
+                  <span className={active ? "text-blue-200" : "text-slate-500"}>{b.count}</span>
+                </button>
+              );
+            })}
+          </div>
+        )}
 
         {/* 데이터 없음 (로딩 완료 후) */}
         {!loading && !info ? (

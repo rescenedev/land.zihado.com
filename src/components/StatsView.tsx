@@ -14,24 +14,26 @@ export function StatsView({
   dataset?: string;
 }) {
   const [data, setData] = useState<Statistics | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [pending, setPending] = useState(true);
   const [err, setErr] = useState("");
 
   useEffect(() => {
     let alive = true;
-    setLoading(true);
     setErr("");
+    setPending(true);
+    // 재조회 중에도 이전 통계를 화면에 유지(깜빡임 제거). 새 데이터 도착 시 교체.
     fetchStatistics(yyyymm, scope, dataset)
       .then((d) => alive && setData(d))
       .catch((e) => alive && setErr(e.message))
-      .finally(() => alive && setLoading(false));
+      .finally(() => alive && setPending(false));
     return () => {
       alive = false;
     };
   }, [yyyymm, scope, dataset]);
 
-  if (loading) return <div className="py-20 text-center text-slate-500">통계 집계 중…</div>;
-  if (err) return <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-300">{err}</div>;
+  // "통계 집계 중"은 최초 로드(이전 데이터 없음)에만 표시
+  if (!data && pending) return <div className="py-20 text-center text-slate-500">통계 집계 중…</div>;
+  if (err && !data) return <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-300">{err}</div>;
   if (!data?.summary)
     return <div className="py-20 text-center text-slate-500">해당 월 데이터가 없습니다.</div>;
 
@@ -42,7 +44,7 @@ export function StatsView({
   const maxDecadeAvg = Math.max(...data.byDecade.map((b) => b.avg), 1);
 
   return (
-    <div className="space-y-6">
+    <div className={`space-y-6 transition-opacity ${pending ? "opacity-50" : ""}`}>
       <div className="text-xs text-slate-500">
         {scope === "all" ? "전국" : scope === "seoul" ? "서울 전체" : `${scope} 전체`} · {yyyymm.slice(0, 4)}.{yyyymm.slice(4, 6)} ·
         표본 {s.count.toLocaleString()}건 · 수집 {data.coverage.loaded}/{data.coverage.total}개 지역

@@ -702,24 +702,28 @@ async function warmCaches(env: Env): Promise<void> {
   const curM = curYmd();
   const dsets = enabledDatasets().map((d) => d.key); // 매매/전월세/분양권
   // ⚠️ URL 파라미터 순서·값을 프론트(src/lib/api.ts)와 정확히 일치 → 같은 캐시 키.
+  // ⚠️ 우선순위 순서대로 워밍(중간에 끊겨도 고가치 키부터 보장).
+  // 1순위: 통계(54개) — 작고 사용자가 가장 자주 보는 집계. 전 데이터셋·전 시도.
   const paths: string[] = [];
   for (const ds of dsets) {
     paths.push(`/api/overview?dataset=${ds}&scope=all&yyyymm=${curM}`);
     paths.push(`/api/overview?dataset=${ds}&scope=seoul&yyyymm=${curM}`);
     for (const s of WARM_SIDOS)
       paths.push(`/api/statistics?dataset=${ds}&scope=${encodeURIComponent(s)}&yyyymm=${curM}`);
-    // 오늘의 실거래(TodayDeals): limit=300, date 항상 포함. 전국=30일, 시도탭=최근 3일.
+  }
+  // 2순위: 오늘의 실거래(recent). limit=300, date 항상. 전국 30일 + 시도탭 최근 7일.
+  for (const ds of dsets) {
     for (let i = 0; i < 30; i++) {
       const dt = shiftDays(i);
       if (!dt) continue;
       const ym = dt.slice(0, 6);
       const d = `${dt.slice(0, 4)}-${dt.slice(4, 6)}-${dt.slice(6, 8)}`;
-      const scopes = i < 3 ? WARM_SIDOS : ["all", "seoul"];
+      const scopes = i < 7 ? WARM_SIDOS : ["all", "seoul"];
       for (const s of scopes)
         paths.push(`/api/recent?dataset=${ds}&scope=${encodeURIComponent(s)}&yyyymm=${ym}&limit=300&date=${d}`);
     }
   }
-  // 시군구 상세: 거래목록 + 단지지도(주 화면) 당월. aptTrade 만(주 데이터셋).
+  // 3순위: 시군구 상세(거래목록 + 단지지도) 당월. aptTrade.
   for (const cd of SGG_CODES) {
     paths.push(`/api/transactions?dataset=aptTrade&region=${cd}&yyyymm=${curM}`);
     paths.push(`/api/aptmap?dataset=aptTrade&region=${cd}&yyyymm=${curM}&limit=40`);

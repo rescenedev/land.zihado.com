@@ -20,26 +20,39 @@ export function RegionCard({
   rank,
   maxInSet,
   onClick,
+  newCount = 0,
 }: {
   data: CardData;
   rank: number;
   maxInSet: number;
   onClick: () => void;
+  newCount?: number; // 최근 신규 신고 거래 수 (>0 이면 glow)
 }) {
   const headline = data.avg84 || data.avg;
   const barPct = maxInSet > 0 ? Math.round((headline / maxInSet) * 100) : 0;
   const top = rank <= 3 && data.count > 0;
+  const fresh = newCount > 0;
 
   return (
     <button
       onClick={onClick}
-      className="group flex flex-col rounded-2xl border border-slate-800 bg-[#111a2e] p-4 text-left transition hover:border-blue-500/60 hover:bg-[#13203a]"
+      className={`group flex flex-col rounded-2xl border p-4 text-left transition hover:bg-[#13203a] ${
+        fresh
+          ? "border-blue-500/50 bg-[#101d36] shadow-[0_0_0_1px_rgba(59,130,246,0.35),0_0_18px_-3px_rgba(59,130,246,0.55)] hover:border-blue-400"
+          : "border-slate-800 bg-[#111a2e] hover:border-blue-500/60"
+      }`}
     >
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-1.5">
           <span className="text-[15px] font-bold text-slate-100">{data.title}</span>
           {data.subtitle && (
             <span className="text-xs text-slate-500">{data.subtitle}</span>
+          )}
+          {fresh && (
+            <span className="ml-0.5 inline-flex items-center gap-1 rounded-full bg-blue-500/15 px-1.5 py-0.5 text-[10px] font-bold text-blue-300">
+              <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-blue-400" />
+              +{newCount}
+            </span>
           )}
         </div>
         {top ? (
