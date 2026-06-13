@@ -1,6 +1,5 @@
-// 빈 문자열 = 상대경로 → Vercel 서울 엣지 프록시(/api/[...path])를 통해 CF 워커 호출(캐시).
-// 로컬은 .env.local 에서 http://localhost:8787 로 워커 직접 호출.
-export const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? "";
+export const API_BASE =
+  process.env.NEXT_PUBLIC_API_BASE ?? "http://localhost:8787";
 
 // 클라이언트 메모리 캐시 + 동일요청 합치기 → 눌렀던 페이지 재방문 즉시(네트워크 0)
 type CacheEntry = { t: number; ok: boolean; data: unknown };
