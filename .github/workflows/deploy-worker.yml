@@ -1,0 +1,29 @@
+name: Deploy Cloudflare Worker
+
+# worker/ 변경이 main 에 푸시되면 Cloudflare 에 자동 배포.
+# 필요한 GitHub Secret:
+#   CLOUDFLARE_API_TOKEN  - dash.cloudflare.com → My Profile → API Tokens → "Edit Cloudflare Workers" 템플릿
+#   CLOUDFLARE_ACCOUNT_ID - (이미 워크플로에 기본값으로 넣어둠, secret 으로 덮어쓸 수 있음)
+on:
+  push:
+    branches: [main]
+    paths:
+      - "worker/**"
+  workflow_dispatch: {}
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - name: Install deps
+        run: bun install
+        working-directory: worker
+      - name: Deploy worker
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID || '6d1f0d35fc1163abed871545006a582a' }}
+          workingDirectory: worker
+          command: deploy
