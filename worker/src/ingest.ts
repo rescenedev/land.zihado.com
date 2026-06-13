@@ -3,7 +3,7 @@ import { fetchMonth, fetchComplexes, type Transaction } from "./molit";
 import { DEFAULT_DATASET } from "./datasets";
 import { getMonthKV, putMonthKV } from "./cache";
 import { geocode } from "./geocode";
-import { REGION_NAMES } from "./regions";
+import { REGION_NAMES, shiftYmd, recentMonths } from "./regions";
 import {
   upsertTransactions,
   upsertComplexes,
@@ -39,7 +39,33 @@ export async function ensureMonth(
   await upsertTransactions(env, rows);
   await upsertRegionAgg(env, dataset, sggCd, dealYmd, rows);
   await logIngest(env, dataset, sggCd, dealYmd, rows.length, rows.length ? "ok" : "empty");
+  // 실거래 갱신 시점 워밍: 방금 적재된 지역·월의 사용자 캐시를 바로 데움(주기 cron 보완).
+  await warmAfterIngest(dataset, sggCd, dealYmd, rows);
   return { rows, source: "molit" };
+}
+
+// 사용자가 닿는 Vercel(ICN) 엣지 캐시를 ingest 직후 데움. 최근 3개월만(과거 백필 제외).
+const VERCEL = "https://land.zihado.com";
+async function warmAfterIngest(
+  dataset: string,
+  sggCd: string,
+  dealYmd: string,
+  rows: Transaction[]
+): Promise<void> {
+  if (rows.length === 0) return;
+  if (!recentMonths(3).includes(dealYmd)) return; // 최근 3개월만
+  const from = shiftYmd(dealYmd, -11);
+  const urls = [
+    `${VERCEL}/api/transactions?dataset=${dataset}&region=${sggCd}&yyyymm=${dealYmd}`,
+    `${VERCEL}/api/aptmap?dataset=${dataset}&region=${sggCd}&yyyymm=${dealYmd}&limit=40`,
+    `${VERCEL}/api/transactions/range?dataset=${dataset}&region=${sggCd}&from=${from}&to=${dealYmd}`,
+    `${VERCEL}/api/complexes?dataset=${dataset}&region=${sggCd}`,
+  ];
+  // 갱신된 단지들의 단지 상세 모달도 즉시 워밍(실거래 찍힌 단지)
+  const apts = [...new Set(rows.map((r) => r.aptName).filter(Boolean))];
+  for (const apt of apts)
+    urls.push(`${VERCEL}/api/complex?dataset=${dataset}&region=${sggCd}&apt=${encodeURIComponent(apt)}&from=${from}&to=${dealYmd}`);
+  await Promise.allSettled(urls.map((u) => fetch(u)));
 }
 
 /** 단지목록 적재 */
@@ -100,6 +126,17 @@ export async function handleJob(env: Env, job: BackfillJob): Promise<void> {
   }
   if (job.type === "geocode") {
     await geocodeRegion(env, job.sggCd);
+    return;
+  }
+  if (job.type === "warmcomplex" && job.apt && job.dealYmd) {
+    // 단지 상세 모달 KV 워밍: 워커 /api/complex 를 호출해 resp:complex 키를 채운다.
+    // (모달은 워커 직접 호출 → KV HIT 시 D1 스캔 회피·서버 ~5ms). 큐로 분산해 subrequest 한도 회피.
+    const ds = job.dataset ?? DEFAULT_DATASET;
+    const from = shiftYmd(job.dealYmd, -11);
+    await fetch(
+      `https://api.zihado.com/api/complex?dataset=${ds}&region=${job.sggCd}` +
+      `&apt=${encodeURIComponent(job.apt)}&from=${from}&to=${job.dealYmd}`
+    );
     return;
   }
   if (job.type === "trades" && job.dealYmd) {

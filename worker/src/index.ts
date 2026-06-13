@@ -685,13 +685,14 @@ app.post("/api/admin/backfill", async (c) => {
 
 // 캐시 워밍 즉시 트리거 (cron 안 기다리고 Vercel+CF 전부 데움)
 app.post("/api/admin/warm", async (c) => {
-  const which = c.req.query("which"); // core | recent-sido | regions | regions-past | (기본 전부)
+  const which = c.req.query("which"); // core | recent-sido | regions | regions-past | complexes | (기본 전부)
   c.executionCtx.waitUntil(
     which === "core" ? warmCore()
       : which === "recent-sido" ? warmRecentSido()
       : which === "regions" ? warmRegions()
       : which === "regions-past" ? warmRegionsPast()
-      : warmCaches()
+      : which === "complexes" ? warmComplexes(c.env)
+      : warmCaches(c.env)
   );
   return c.json({ ok: true, started: true, which: which ?? "all" });
 });
@@ -787,12 +788,37 @@ async function warmRegionsPast(): Promise<void> {
   await warmPaths(paths);
 }
 
+// cron E (단지 상세): 실거래 찍힌 단지(단지 상세 모달)를 미리 굽는다.
+// 당월 거래 있는 distinct (sgg,apt) 수천 개 → 한 호출 subrequest 한도 회피 위해
+// KV 오프셋으로 청크 순환. ORDER BY sgg_cd → 서울(11)·경기(41) 먼저 워밍.
+// from/to 는 ComplexDetail 의 fetchComplexDeals(region,apt,yyyymm-11,yyyymm) 과 정확히 일치.
+const COMPLEX_CHUNK = 900;
+async function warmComplexes(env: Env): Promise<void> {
+  const curM = curYmd();
+  const from = shiftYmd(curM, -11);
+  const offKey = "warm:complex:off";
+  const off = Number(await env.CACHE.get(offKey)) || 0;
+  const { results } = await env.DB.prepare(
+    `SELECT DISTINCT sgg_cd, apt_name FROM transactions
+     WHERE dataset='aptTrade' AND deal_ymd=? ORDER BY sgg_cd, apt_name LIMIT ? OFFSET ?`
+  ).bind(curM, COMPLEX_CHUNK, off).all();
+  const rows = results as { sgg_cd: string; apt_name: string }[];
+  const paths = rows.map(
+    (r) => `/api/complex?dataset=aptTrade&region=${r.sgg_cd}&apt=${encodeURIComponent(r.apt_name)}&from=${from}&to=${curM}`
+  );
+  await warmPaths(paths);
+  // 끝까지 갔으면 0으로 되돌려 다음 사이클(SWR 7일이라 이미 구운 건 유지)
+  const next = rows.length < COMPLEX_CHUNK ? 0 : off + COMPLEX_CHUNK;
+  await env.CACHE.put(offKey, String(next));
+}
+
 // 수동 트리거(admin/warm)·초기화용: 전부 순차 실행.
-async function warmCaches(): Promise<void> {
+async function warmCaches(env: Env): Promise<void> {
   await warmCore();
   await warmRecentSido();
   await warmRegions();
   await warmRegionsPast();
+  await warmComplexes(env);
 }
 
 function buildBackfillJobs(months: number): BackfillJob[] {
@@ -806,6 +832,18 @@ function buildBackfillJobs(months: number): BackfillJob[] {
     }
   }
   return jobs;
+}
+
+// 당월 거래 단지 전부를 단지모달 KV 워밍 작업으로 큐 적재 (큐가 분산 처리 → subrequest 한도 회피).
+async function enqueueComplexWarm(env: Env): Promise<void> {
+  const curM = curYmd();
+  const { results } = await env.DB.prepare(
+    `SELECT DISTINCT sgg_cd, apt_name FROM transactions WHERE dataset='aptTrade' AND deal_ymd=?`
+  ).bind(curM).all();
+  const jobs = (results as { sgg_cd: string; apt_name: string }[]).map(
+    (r) => ({ type: "warmcomplex", sggCd: r.sgg_cd, apt: r.apt_name, dataset: "aptTrade", dealYmd: curM } as BackfillJob)
+  );
+  await enqueue(env, jobs);
 }
 
 async function enqueue(env: Env, jobs: BackfillJob[]): Promise<void> {
@@ -836,19 +874,21 @@ function monthsBetween(from: string, to: string): string[] {
 export default {
   fetch: app.fetch,
 
-  // Cron 2개로 분리(각 호출이 subrequest 한도 내 완료되도록):
-  //   "0,30"  → 코어 워밍(대시보드/통계/오늘의실거래) + 백필
-  //   "15,45" → 지역 워밍(시군구 거래목록/단지지도)
+  // 1일 1회(분 stagger). subrequest 한도(1000/호출) 회피 위해 워밍을 3개 cron 으로 분할.
+  //   30 0 → 백필(당월+전월) + 코어 워밍(대시보드/통계/오늘의실거래 전국·서울)
+  //   34 0 → 지역 워밍(시군구 거래목록/단지지도/추이) 당월
+  //   38 0 → 오늘의실거래 시도탭 + 과거월 지역
+  // 단지 상세 모달은 on-demand(~150ms) + warmAfterIngest(신규 단지)로 충분 → bulk cron 워밍 제거.
   async scheduled(event: ScheduledController, env: Env, ctx: ExecutionContext) {
-    if (event.cron === "15,45 * * * *") {
-      ctx.waitUntil(warmRegions());          // cron B: 시군구 상세 당월
-    } else if (event.cron === "22,52 * * * *") {
-      ctx.waitUntil(warmRegionsPast());      // cron D: 시군구 상세 과거 2개월
-    } else if (event.cron === "7,37 * * * *") {
-      ctx.waitUntil(warmRecentSido());       // cron C: 오늘의실거래 시도탭
+    if (event.cron === "34 0 * * *") {
+      ctx.waitUntil(warmRegions());
+    } else if (event.cron === "38 0 * * *") {
+      ctx.waitUntil((async () => { await warmRecentSido(); await warmRegionsPast(); })());
+    } else if (event.cron === "42 0 * * *") {
+      ctx.waitUntil(enqueueComplexWarm(env)); // 단지 상세 모달 KV 워밍(당월 단지 전부, 큐 분산)
     } else {
       ctx.waitUntil(enqueue(env, buildBackfillJobs(2)));
-      ctx.waitUntil(warmCore());             // cron A: 대시보드/통계/오늘의실거래(전국·서울)
+      ctx.waitUntil(warmCore());
     }
   },
 

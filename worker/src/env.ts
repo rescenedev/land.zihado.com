@@ -10,8 +10,9 @@ export interface Env {
 }
 
 export type BackfillJob = {
-  type: "trades" | "complexes" | "geocode";
+  type: "trades" | "complexes" | "geocode" | "warmcomplex";
   sggCd: string;
-  dataset?: string; // trades 일 때 데이터셋 키
-  dealYmd?: string; // trades 일 때만
+  dataset?: string; // trades/warmcomplex 일 때 데이터셋 키
+  dealYmd?: string; // trades/warmcomplex(=기준월) 일 때
+  apt?: string; // warmcomplex 일 때 단지명
 };
