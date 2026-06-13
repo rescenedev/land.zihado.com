@@ -686,7 +686,8 @@ export default function Home() {
         <footer className="mt-12 space-y-1.5 border-t border-slate-800/60 pt-4 text-center text-[11px] text-slate-600">
           <div className="text-slate-500">
             <span className="font-medium text-emerald-400/80">성능</span>
-            {" · "}서버 ~6ms{" · "}p50 47~53ms{" · "}추이집계 1.3ms{" · "}전국 콜드집계 365ms
+            {" · "}API p50 55ms{" · "}p95 74ms{" · "}콜드 전국집계 ~185ms{" · "}엣지캐시 HIT
+            <span className="ml-1 text-slate-600">(k6 실측 · 한국↔엣지 왕복 포함)</span>
           </div>
           <div>데이터 출처: 국토교통부 실거래가 공개시스템 (data.go.kr) · KV/D1 캐시 백엔드 · 지도 © Kakao</div>
         </footer>
