@@ -554,13 +554,22 @@ export default function Home() {
         </div>
 
         {/* 컨트롤 바: [월] [시도칩 2줄 wrap·중앙] [뷰토글] */}
-        <div className="mb-5 flex items-start gap-3">
+        <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-start">
+          {/* 모바일: 월선택 + 뷰토글 한 줄, 시도칩 아래 전체폭 / 데스크톱: 3단 한 줄 */}
+          <div className="flex items-center justify-between gap-2 sm:contents">
           <div className="flex shrink-0 items-center gap-1 rounded-lg border border-slate-700 bg-slate-800/40 p-1">
             <NavBtn onClick={() => setYyyymm((m) => shiftMonth(m, -1))}>‹</NavBtn>
             <span className="min-w-[88px] text-center text-sm font-semibold text-slate-100">
               {yyyymm.slice(0, 4)}.{yyyymm.slice(4, 6)}
             </span>
             <NavBtn onClick={() => setYyyymm((m) => shiftMonth(m, 1))}>›</NavBtn>
+          </div>
+          {/* 뷰토글: 모바일에선 월선택과 같은 줄(여기), 데스크톱에선 sm:contents로 원위치 */}
+          <div className="flex shrink-0 items-center gap-1 rounded-lg bg-slate-800/60 p-1 text-sm sm:hidden">
+            <Seg active={view === "cards"} onClick={() => setView("cards")}>카드</Seg>
+            <Seg active={view === "map"} onClick={() => setView("map")}>지도</Seg>
+            <Seg active={view === "stats"} onClick={() => setView("stats")}>통계</Seg>
+          </div>
           </div>
 
           <div className="flex flex-1 flex-wrap content-start gap-1.5">
@@ -599,7 +608,7 @@ export default function Home() {
             })}
           </div>
 
-          <div className="flex shrink-0 items-center gap-1 rounded-lg bg-slate-800/60 p-1 text-sm">
+          <div className="hidden shrink-0 items-center gap-1 rounded-lg bg-slate-800/60 p-1 text-sm sm:flex">
             <Seg active={view === "cards"} onClick={() => setView("cards")}>카드</Seg>
             <Seg active={view === "map"} onClick={() => setView("map")}>지도</Seg>
             <Seg active={view === "stats"} onClick={() => setView("stats")}>통계</Seg>
