@@ -685,8 +685,11 @@ app.post("/api/admin/backfill", async (c) => {
 
 // 캐시 워밍 즉시 트리거 (cron 안 기다리고 Vercel+CF 전부 데움)
 app.post("/api/admin/warm", async (c) => {
-  c.executionCtx.waitUntil(warmCaches(c.env));
-  return c.json({ ok: true, started: true });
+  const which = c.req.query("which"); // core | regions | (기본 둘 다)
+  c.executionCtx.waitUntil(
+    which === "core" ? warmCore() : which === "regions" ? warmRegions() : warmCaches()
+  );
+  return c.json({ ok: true, started: true, which: which ?? "all" });
 });
 
 // 자체 엔드포인트 호출로 KV 응답 캐시 워밍 (콜드 제거)
@@ -698,12 +701,21 @@ const WARM_SIDOS = [
 // 사용자가 닿는 Vercel(ICN) 엣지 캐시만 데움(MISS는 CF까지 채워 양쪽 레이어 동시 워밍).
 // CF Worker subrequest 한도(1000/호출)를 넘기지 않도록 워밍 세트를 당월 중심으로 한정.
 const VERCEL_BASE = "https://land.zihado.com";
-async function warmCaches(env: Env): Promise<void> {
+
+// Vercel(→CF 캐스케이드) 경로들을 동시 12개씩 fetch. subrequest 한도 내 완료 보장용.
+async function warmPaths(paths: string[]): Promise<void> {
+  const all = paths.map((p) => VERCEL_BASE + p);
+  const CONC = 12;
+  for (let i = 0; i < all.length; i += CONC) {
+    await Promise.allSettled(all.slice(i, i + CONC).map((u) => fetch(u)));
+  }
+}
+
+// cron A (코어): 대시보드 + 통계 + 오늘의실거래. 전 데이터셋. (~390 요청, 한 번에 완료)
+// ⚠️ URL 파라미터 순서·값을 프론트(src/lib/api.ts)와 정확히 일치시켜야 같은 캐시 키.
+async function warmCore(): Promise<void> {
   const curM = curYmd();
   const dsets = enabledDatasets().map((d) => d.key); // 매매/전월세/분양권
-  // ⚠️ URL 파라미터 순서·값을 프론트(src/lib/api.ts)와 정확히 일치 → 같은 캐시 키.
-  // ⚠️ 우선순위 순서대로 워밍(중간에 끊겨도 고가치 키부터 보장).
-  // 1순위: 통계(54개) — 작고 사용자가 가장 자주 보는 집계. 전 데이터셋·전 시도.
   const paths: string[] = [];
   for (const ds of dsets) {
     paths.push(`/api/overview?dataset=${ds}&scope=all&yyyymm=${curM}`);
@@ -711,7 +723,6 @@ async function warmCaches(env: Env): Promise<void> {
     for (const s of WARM_SIDOS)
       paths.push(`/api/statistics?dataset=${ds}&scope=${encodeURIComponent(s)}&yyyymm=${curM}`);
   }
-  // 2순위: 오늘의 실거래(recent). limit=300, date 항상. 전국 30일 + 시도탭 최근 7일.
   for (const ds of dsets) {
     for (let i = 0; i < 30; i++) {
       const dt = shiftDays(i);
@@ -723,17 +734,24 @@ async function warmCaches(env: Env): Promise<void> {
         paths.push(`/api/recent?dataset=${ds}&scope=${encodeURIComponent(s)}&yyyymm=${ym}&limit=300&date=${d}`);
     }
   }
-  // 3순위: 시군구 상세(거래목록 + 단지지도) 당월. aptTrade.
+  await warmPaths(paths);
+}
+
+// cron B (지역): 시군구 상세(거래목록 + 단지지도) 당월. 250개 × 2 = ~500 요청.
+async function warmRegions(): Promise<void> {
+  const curM = curYmd();
+  const paths: string[] = [];
   for (const cd of SGG_CODES) {
     paths.push(`/api/transactions?dataset=aptTrade&region=${cd}&yyyymm=${curM}`);
     paths.push(`/api/aptmap?dataset=aptTrade&region=${cd}&yyyymm=${curM}&limit=40`);
   }
-  // Vercel 만 워밍(→CF 캐스케이드). subrequest 한도 내로 유지.
-  const all = paths.map((p) => VERCEL_BASE + p);
-  const CONC = 12;
-  for (let i = 0; i < all.length; i += CONC) {
-    await Promise.allSettled(all.slice(i, i + CONC).map((u) => fetch(u)));
-  }
+  await warmPaths(paths);
+}
+
+// 수동 트리거(admin/warm)·초기화용: 둘 다 순차 실행.
+async function warmCaches(): Promise<void> {
+  await warmCore();
+  await warmRegions();
 }
 
 function buildBackfillJobs(months: number): BackfillJob[] {
@@ -777,10 +795,16 @@ function monthsBetween(from: string, to: string): string[] {
 export default {
   fetch: app.fetch,
 
-  // Cron(30분): ①최근 2개월 백필 ②주요 캐시 워밍(콜드 제거)
-  async scheduled(_event: ScheduledController, env: Env, ctx: ExecutionContext) {
-    ctx.waitUntil(enqueue(env, buildBackfillJobs(2)));
-    ctx.waitUntil(warmCaches(env));
+  // Cron 2개로 분리(각 호출이 subrequest 한도 내 완료되도록):
+  //   "0,30"  → 코어 워밍(대시보드/통계/오늘의실거래) + 백필
+  //   "15,45" → 지역 워밍(시군구 거래목록/단지지도)
+  async scheduled(event: ScheduledController, env: Env, ctx: ExecutionContext) {
+    if (event.cron === "15,45 * * * *") {
+      ctx.waitUntil(warmRegions());
+    } else {
+      ctx.waitUntil(enqueue(env, buildBackfillJobs(2)));
+      ctx.waitUntil(warmCore());
+    }
   },
 
   // Queue 소비자: 백필 작업 처리

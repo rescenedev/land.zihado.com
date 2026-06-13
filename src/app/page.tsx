@@ -174,6 +174,23 @@ export default function Home() {
     return m;
   }, [regions, newByRegion]);
 
+  // glow 임계값: 신규 거래 상위 ~30% 지역만 강조(전부 glow 방지). 그룹별로 따로 산출.
+  const cutoffOf = (vals: number[]) => {
+    const v = vals.filter((n) => n > 0).sort((a, b) => b - a);
+    if (v.length === 0) return Infinity;
+    return v[Math.max(0, Math.ceil(v.length * 0.3) - 1)];
+  };
+  const sidoGlowCutoff = useMemo(() => cutoffOf(Object.values(newBySido)), [newBySido]);
+  const regionGlowCutoff = useMemo(() => cutoffOf(Object.values(newByRegion)), [newByRegion]);
+  // 카드/마커 key 로 glow 여부 판정
+  const isHot = useCallback(
+    (key: string, isSido: boolean) => {
+      const n = isSido ? (newBySido[key] ?? 0) : (newByRegion[key] ?? 0);
+      return n > 0 && n >= (isSido ? sidoGlowCutoff : regionGlowCutoff);
+    },
+    [newBySido, newByRegion, sidoGlowCutoff, regionGlowCutoff]
+  );
+
   const cards: CardData[] = useMemo(() => {
     if (scope === "seoul") return regions.map(toGuCard);
     if (selectedSido)
@@ -217,10 +234,10 @@ export default function Home() {
       .map((c) => {
         const ll = centroidFor(c.key, !!c.isSido);
         if (!ll || c.count === 0) return null;
-        return { ...c, lat: ll[0], lng: ll[1] } as MapItem;
+        return { ...c, lat: ll[0], lng: ll[1], fresh: isHot(c.isSido ? c.title : c.key, !!c.isSido) } as MapItem;
       })
       .filter((x): x is MapItem => x !== null);
-  }, [sortedCards]);
+  }, [sortedCards, isHot]);
 
   const aptMaxVal = useMemo(
     () => (aptItems ? Math.max(1, ...aptItems.map((a) => a.avg)) : 0),
@@ -568,10 +585,15 @@ export default function Home() {
                   className={`shrink-0 rounded-full px-3 py-1.5 text-sm font-medium transition ${
                     active
                       ? "bg-blue-600 text-white"
-                      : "bg-slate-800/60 text-slate-400 hover:text-slate-200"
+                      : sd !== "전국" && isHot(sd, true)
+                        ? "bg-blue-500/15 text-blue-300 shadow-[0_0_10px_-2px_rgba(59,130,246,0.6)] ring-1 ring-blue-500/40"
+                        : "bg-slate-800/60 text-slate-400 hover:text-slate-200"
                   }`}
                 >
                   {sd}
+                  {sd !== "전국" && (newBySido[sd] ?? 0) > 0 && (
+                    <span className={`ml-1 text-[10px] ${active ? "text-blue-200" : "text-blue-400"}`}>+{newBySido[sd]}</span>
+                  )}
                 </button>
               );
             })}
@@ -648,6 +670,7 @@ export default function Home() {
                     rank={i + 1}
                     maxInSet={maxInSet}
                     newCount={card.isSido ? (newBySido[card.title] ?? 0) : (newByRegion[card.key] ?? 0)}
+                    glow={isHot(card.isSido ? card.title : card.key, !!card.isSido)}
                     onClick={() =>
                       card.isSido
                         ? setSelectedSido(card.title)

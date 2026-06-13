@@ -20,6 +20,7 @@ export type MapItem = {
   avg: number;
   max?: number;
   isSido?: boolean;
+  fresh?: boolean; // 최근 신규 거래 상위 지역 → glow
   lat: number;
   lng: number;
 };
@@ -78,8 +79,12 @@ function bubbleEl(
     rank && rank <= 10
       ? `<span style="display:inline-flex;align-items:center;justify-content:center;min-width:16px;height:16px;padding:0 4px;border-radius:999px;background:#fff;color:${color};font-weight:900;font-size:10px">${rank}</span>`
       : "";
+  // 최근 신규 거래 상위 지역: 푸른 glow + 외곽 링
+  const glowCss = item.fresh
+    ? "box-shadow:0 0 0 2px rgba(96,165,250,.9),0 0 14px 2px rgba(59,130,246,.7);border:1.5px solid rgba(147,197,253,.95)"
+    : "box-shadow:0 3px 12px rgba(0,0,0,.35);border:1.5px solid rgba(255,255,255,.85)";
   el.innerHTML = `
-    <div style="background:${color};border-radius:999px;padding:5px 11px;box-shadow:0 3px 12px rgba(0,0,0,.35);white-space:nowrap;border:1.5px solid rgba(255,255,255,.85);display:flex;align-items:center;gap:6px">
+    <div style="background:${color};border-radius:999px;padding:5px 11px;${glowCss};white-space:nowrap;display:flex;align-items:center;gap:6px">
       ${rankBadge}
       <span style="font-weight:700;font-size:11px;color:#fff;text-shadow:0 1px 2px rgba(0,0,0,.25)">${item.title}</span>
       <span style="font-weight:800;font-size:11.5px;color:#fff;text-shadow:0 1px 2px rgba(0,0,0,.25)">${formatEok(headline)}</span>

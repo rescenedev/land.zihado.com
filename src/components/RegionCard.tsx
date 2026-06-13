@@ -21,17 +21,20 @@ export function RegionCard({
   maxInSet,
   onClick,
   newCount = 0,
+  glow = false,
 }: {
   data: CardData;
   rank: number;
   maxInSet: number;
   onClick: () => void;
-  newCount?: number; // 최근 신규 신고 거래 수 (>0 이면 glow)
+  newCount?: number; // 최근 신규 신고 거래 수 (>0 이면 배지)
+  glow?: boolean; // 신규 활동 상위 지역만 glow
 }) {
   const headline = data.avg84 || data.avg;
   const barPct = maxInSet > 0 ? Math.round((headline / maxInSet) * 100) : 0;
   const top = rank <= 3 && data.count > 0;
-  const fresh = newCount > 0;
+  const fresh = glow;
+  const hasNew = newCount > 0;
 
   return (
     <button
@@ -48,9 +51,11 @@ export function RegionCard({
           {data.subtitle && (
             <span className="text-xs text-slate-500">{data.subtitle}</span>
           )}
-          {fresh && (
-            <span className="ml-0.5 inline-flex items-center gap-1 rounded-full bg-blue-500/15 px-1.5 py-0.5 text-[10px] font-bold text-blue-300">
-              <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-blue-400" />
+          {hasNew && (
+            <span className={`ml-0.5 inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-bold ${
+              fresh ? "bg-blue-500/20 text-blue-300" : "bg-slate-700/50 text-slate-400"
+            }`}>
+              {fresh && <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-blue-400" />}
               +{newCount}
             </span>
           )}
