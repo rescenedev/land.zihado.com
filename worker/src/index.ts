@@ -716,10 +716,12 @@ const WARM_SIDOS = [
 const VERCEL_BASE = "https://land.zihado.com";
 const WORKER_BASE = "https://api.zihado.com";
 
-// 경로들을 동시 12개씩 fetch. subrequest 한도 내 완료 보장용. base 로 CDN 포함 여부 결정.
+// 경로들을 동시 5개씩 fetch. base 로 CDN 포함 여부 결정.
+// ⚠️ 동시성을 낮춰야(5) 핸들러의 waitUntil KV 쓰기가 isolate 재활용 전에 완료됨
+//    (고동시성 시 KV 쓰기 드롭 → 워밍해도 KV 바닥이 비는 현상 실측).
 async function warmPaths(paths: string[], base: string = VERCEL_BASE): Promise<void> {
   const all = paths.map((p) => base + p);
-  const CONC = 12;
+  const CONC = 5;
   for (let i = 0; i < all.length; i += CONC) {
     await Promise.allSettled(all.slice(i, i + CONC).map((u) => fetch(u)));
   }
@@ -748,6 +750,9 @@ async function warmCore(): Promise<void> {
         paths.push(`/api/recent?dataset=${ds}&scope=${s}&yyyymm=${ym}&limit=300&date=${d}`);
     }
   }
+  // 코어는 양 레이어 확보: 워커 KV(글로벌 바닥, CDN evict 돼도 ~55ms) + Vercel CDN(핫 ~15ms).
+  // ⚠️ 프록시 고동시성 워밍은 KV 쓰기(waitUntil)를 드롭함 → KV 는 워커직결로 별도 워밍.
+  await warmPaths(paths, WORKER_BASE);
   await warmPaths(paths);
 }
 
