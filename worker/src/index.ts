@@ -693,7 +693,7 @@ app.post("/api/admin/warm", async (c) => {
   const which = c.req.query("which"); // core | recent-sido | regions | regions-past | complexes | (기본 전부)
   c.executionCtx.waitUntil(
     which === "core" ? warmCore()
-      : which === "recent-sido" ? warmRecentSido()
+      : which === "recent-sido" ? warmRecentSido(enabledDatasets().map((d) => d.key))
       : which === "regions" ? warmRegions()
       : which === "regions-past" ? warmRegionsPast()
       : which === "complexes" ? warmComplexes(c.env)
@@ -747,13 +747,15 @@ async function warmCore(): Promise<void> {
   await warmPaths(paths);
 }
 
-// cron C (오늘의실거래 시도탭): recent 시도 × 최근 14일 × 전 데이터셋. (~750 요청)
+// 오늘의실거래 시도탭: recent 시도 × 최근 N일. 데이터셋별로 cron 분할 호출해
+// subrequest 한도(1000/invocation)와 Vercel CDN 용량을 동시에 회피.
+// (전국/서울은 warmCore 가 30일치 굽고, 여기서는 16개 시도탭만.)
 const RECENT_SIDOS = WARM_SIDOS.filter((s) => s !== "all" && s !== "seoul");
-async function warmRecentSido(): Promise<void> {
+const RECENT_WARM_DAYS = 31; // 한달치(롤링) — 날짜 네비가 한달 안이면 항상 워밍됨
+async function warmRecentSido(dsets: string[], days = RECENT_WARM_DAYS): Promise<void> {
   const paths: string[] = [];
-  const dsets = enabledDatasets().map((d) => d.key);
   for (const ds of dsets) {
-    for (let i = 0; i < 14; i++) {
+    for (let i = 0; i < days; i++) {
       const dt = shiftDays(i);
       if (!dt) continue;
       const ym = dt.slice(0, 6);
@@ -762,7 +764,7 @@ async function warmRecentSido(): Promise<void> {
         paths.push(`/api/recent?dataset=${ds}&scope=${encodeURIComponent(s)}&yyyymm=${ym}&limit=300&date=${d}`);
     }
   }
-  await warmPaths(paths);
+  await warmPaths(paths); // ds당 31×16=496 요청 → 한도 내
 }
 
 // cron B (지역-당월): 거래목록 + 단지지도 + 12개월 추이 + 단지목록. 128 × 4 = ~512 요청.
@@ -820,7 +822,7 @@ async function warmComplexes(env: Env): Promise<void> {
 // 수동 트리거(admin/warm)·초기화용: 전부 순차 실행.
 async function warmCaches(env: Env): Promise<void> {
   await warmCore();
-  await warmRecentSido();
+  await warmRecentSido(enabledDatasets().map((d) => d.key));
   await warmRegions();
   await warmRegionsPast();
   await warmComplexes(env);
@@ -879,20 +881,27 @@ function monthsBetween(from: string, to: string): string[] {
 export default {
   fetch: app.fetch,
 
-  // 1일 1회(분 stagger). subrequest 한도(1000/호출) 회피 위해 워밍을 3개 cron 으로 분할.
-  //   30 0 → 백필(당월+전월) + 코어 워밍(대시보드/통계/오늘의실거래 전국·서울)
-  //   34 0 → 지역 워밍(시군구 거래목록/단지지도/추이) 당월
-  //   38 0 → 오늘의실거래 시도탭 + 과거월 지역
-  // 단지 상세 모달은 on-demand(~150ms) + warmAfterIngest(신규 단지)로 충분 → bulk cron 워밍 제거.
+  // 1일 1회(분 stagger). subrequest 한도(1000/invocation) 회피 위해 워밍을 cron 별로 분할.
+  //   30 0 → 백필(당월+전월) + 코어 워밍(대시보드/통계/오늘의실거래 전국·서울 30일)
+  //   32 0 → 오늘의실거래 시도탭 aptTrade × 31일 (16시도 = 496요청)
+  //   34 0 → 오늘의실거래 시도탭 aptRent  × 31일
+  //   36 0 → 오늘의실거래 시도탭 silvTrade × 31일
+  //   42 0 → 단지 상세 모달 KV 워밍(큐 분산)
+  // ⚠️ 지역(시군구 거래목록/단지지도)·과거월은 128시군구×다엔드포인트=수천 URL → CDN(~2천) thrash
+  //    → CDN 워밍에서 제외(워커 KV 큐 + 프론트 점진렌더 + SWR 7일로 처리).
+  //    오늘의실거래 시도탭은 bounded(데이터셋당 496) 라 한달치 전체를 CDN 에 워밍해도 안전.
   async scheduled(event: ScheduledController, env: Env, ctx: ExecutionContext) {
-    // ⚠️ 지역/recent시도/과거월을 Vercel CDN 에 워밍하면 CDN(~2천 용량)을 thrash 시켜
-    //    핫키(통계·대시보드)까지 evict 됨 → CDN 워밍은 핫 bounded(core) 만.
-    //    지역상세·단지모달 등 long-tail 은 워커 KV(아래 큐) + 프론트 점진렌더로 처리.
-    if (event.cron === "42 0 * * *") {
+    if (event.cron === "32 0 * * *") {
+      ctx.waitUntil(warmRecentSido(["aptTrade"]));
+    } else if (event.cron === "34 0 * * *") {
+      ctx.waitUntil(warmRecentSido(["aptRent"]));
+    } else if (event.cron === "36 0 * * *") {
+      ctx.waitUntil(warmRecentSido(["silvTrade"]));
+    } else if (event.cron === "42 0 * * *") {
       ctx.waitUntil(enqueueComplexWarm(env)); // 단지 상세 모달 KV 워밍(당월 단지 전부, 큐 분산)
     } else {
       ctx.waitUntil(enqueue(env, buildBackfillJobs(2)));
-      ctx.waitUntil(warmCore());              // 핫 bounded 만 CDN 워밍
+      ctx.waitUntil(warmCore());              // 대시보드/통계/오늘의실거래 전국·서울 30일
     }
   },
 
