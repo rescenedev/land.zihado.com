@@ -1,6 +1,6 @@
 "use client";
 
-import { ReactNode, useState } from "react";
+import { ReactNode, useEffect, useState } from "react";
 
 export type NavItem = { key: string; label: string; locked?: boolean };
 
@@ -17,7 +17,15 @@ export function Shell({
   activeKey?: string;
   onNav?: (key: string) => void;
 }) {
-  const [open, setOpen] = useState(true);
+  // SSR/모바일은 닫힌 채 시작(드로어가 콘텐츠를 가리지 않게). 데스크톱(md+)만 마운트 후 펼침.
+  const [open, setOpen] = useState(false);
+  // 첫 페인트에서 데스크톱을 즉시(애니메이션 없이) 펼치고, 이후 사용자 토글에만 트랜지션 적용.
+  const [ready, setReady] = useState(false);
+  useEffect(() => {
+    if (window.matchMedia("(min-width: 768px)").matches) setOpen(true);
+    const id = requestAnimationFrame(() => setReady(true));
+    return () => cancelAnimationFrame(id);
+  }, []);
   return (
     <div className="flex min-h-screen bg-[#0b1120] text-slate-100">
       {/* 모바일 오버레이 */}
@@ -30,7 +38,9 @@ export function Shell({
 
       {/* 사이드바 (drawer) */}
       <aside
-        className={`fixed z-40 flex h-full w-60 shrink-0 flex-col border-r border-slate-800/80 bg-[#0f172a] px-3 py-5 transition-transform duration-200 md:static md:h-auto md:transition-[width,transform] ${
+        className={`fixed z-40 flex h-full w-60 shrink-0 flex-col border-r border-slate-800/80 bg-[#0f172a] px-3 py-5 md:static md:h-auto ${
+          ready ? "transition-transform duration-200 md:transition-[width,transform]" : ""
+        } ${
           open ? "translate-x-0 md:w-60" : "-translate-x-full md:w-0 md:overflow-hidden md:border-r-0 md:px-0"
         }`}
       >
