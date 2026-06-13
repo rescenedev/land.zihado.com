@@ -1,0 +1,47 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "landman-worker",
+  "main": "src/index.ts",
+  "compatibility_date": "2025-06-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": { "enabled": true },
+
+  // 커스텀 도메인: Pro zone(zihado.com) 라우팅을 받아 ICN/NRT 서빙
+  // (workers.dev 는 Workers 플랜에 묶여 HKG 로 오프로드됨)
+  "routes": [{ "pattern": "api.zihado.com", "custom_domain": true }],
+
+  // KV: 월별 실거래 payload 핫캐시 (주력 속도 레이어)
+  "kv_namespaces": [
+    { "binding": "CACHE", "id": "765a7ded764444f1a0284c749c5b9f67" }
+  ],
+
+  // D1: 다월 추이 / 단지 카탈로그 등 부가 쿼리용
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "landman",
+      "database_id": "0bcb0d7c-de0a-4ff2-a715-4f79f1921964",
+      "migrations_dir": "migrations"
+    }
+  ],
+
+  // Queue: 백필 작업 (지역×월 단위로 분산 수집)
+  "queues": {
+    "producers": [{ "binding": "BACKFILL_Q", "queue": "landman-backfill" }],
+    "consumers": [
+      {
+        "queue": "landman-backfill",
+        "max_batch_size": 5,
+        "max_batch_timeout": 10,
+        "max_retries": 3
+      }
+    ]
+  },
+
+  // Cron: 주기적 백필 (당월/최근월 갱신 + 누락분 채움)
+  "triggers": { "crons": ["*/30 * * * *"] },
+
+  "vars": {
+    "BACKFILL_MONTHS": "12"
+  }
+}

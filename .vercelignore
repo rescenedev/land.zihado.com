@@ -1,0 +1,10 @@
+worker
+out
+.next
+node_modules
+tests
+.wrangler
+*.sqlite
+.omc
+.claude
+bun.lock

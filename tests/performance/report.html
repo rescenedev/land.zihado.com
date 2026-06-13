@@ -1,0 +1,196 @@
+<!DOCTYPE html><html lang="ko"><head><meta charset="UTF-8">
+<title>Landman API 성능 개선 리포트</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#0f172a;color:#e2e8f0;padding:2.5rem;line-height:1.55}
+h1{font-size:1.7rem;margin-bottom:.3rem}
+h2{font-size:1.15rem;margin:2.2rem 0 .8rem;color:#93c5fd;border-left:3px solid #3b82f6;padding-left:.6rem}
+.meta{color:#94a3b8;font-size:.85rem;margin-bottom:.5rem}
+.cards{display:flex;gap:1rem;margin:1.5rem 0;flex-wrap:wrap}
+.card{background:#1e293b;border-radius:.6rem;padding:1rem 1.3rem;flex:1;min-width:150px}
+.card .n{font-size:1.8rem;font-weight:700}
+.card .l{font-size:.78rem;color:#94a3b8;margin-top:.2rem}
+table{width:100%;border-collapse:collapse;background:#1e293b;border-radius:.6rem;overflow:hidden;font-size:.86rem;margin-top:.5rem}
+th{background:#0f172a;color:#cbd5e1;padding:.6rem .7rem;text-align:left;font-size:.72rem;text-transform:uppercase;letter-spacing:.03em}
+td{padding:.55rem .7rem;border-bottom:1px solid #334155}
+tr:last-child td{border-bottom:none}
+code{font-family:"SF Mono",monospace;background:#0f172a;padding:.1rem .4rem;border-radius:.25rem;font-size:.82rem;color:#7dd3fc}
+.bold{font-weight:700;color:#fff}
+.dim{color:#64748b;font-size:.75rem}
+.before{color:#f87171;font-family:monospace}
+.after{color:#4ade80;font-family:monospace;font-weight:700}
+.badge{color:#fff;font-size:.7rem;font-weight:700;padding:.15rem .5rem;border-radius:999px}
+.note{background:#1e293b;border-radius:.6rem;padding:1rem 1.3rem;margin-top:1rem;font-size:.88rem;color:#cbd5e1}
+.note b{color:#fbbf24}
+</style></head><body>
+<h1>Landman API 성능 개선 리포트</h1>
+<p class="meta">대상: https://api.zihado.com (Cloudflare Worker, Pro) · 측정: 엔드포인트별 1,000회 · 단일 연결 재사용 + br 압축(실브라우저 동일 조건) · 2026-06-13 20:42</p>
+
+<div class="cards">
+  <div class="card"><div class="n">15</div><div class="l">엔드포인트</div></div>
+  <div class="card"><div class="n">15,000</div><div class="l">총 호출 수</div></div>
+  <div class="card"><div class="n">~6ms</div><div class="l">순수 서버 처리(엣지 HIT)</div></div>
+  <div class="card"><div class="n">37ms</div><div class="l">NRT(도쿄) 왕복 RTT — 물리 바닥</div></div>
+</div>
+
+<h2>무엇이 문제였고, 어떻게 고쳤나</h2>
+<table>
+<thead><tr><th>영역</th><th>문제</th><th>조치</th><th>Before</th><th>After</th></tr></thead>
+<tbody><tr>
+      <td class="bold">recent API</td><td>인덱스 부재 + 캐시 미적용으로 매 요청 23K행 정렬, KV 미스 시 동시 폭주</td><td>복합인덱스(dataset,deal_ymd,deal_date) + KV 응답캐시 + inflight 중복제거</td>
+      <td class="before">10,500ms</td><td class="after">정상</td>
+    </tr><tr>
+      <td class="bold">overview cold</td><td>당월 7천행 집계인데 쿼리플래너가 110만행 풀스캔(통계 부재)</td><td>ANALYZE 로 플래너 통계 갱신 → 인덱스 시크</td>
+      <td class="before">126ms / 110만행</td><td class="after">33ms / 2.4만행</td>
+    </tr><tr>
+      <td class="bold">regionTrends</td><td>6개월 추이를 매번 raw 33만행 GROUP BY</td><td>월·지역 사전집계 테이블(region_month_agg) 도입 → 756행 룩업</td>
+      <td class="before">485ms</td><td class="after">1.3ms</td>
+    </tr><tr>
+      <td class="bold">overview cold(종합)</td><td>집계 3쿼리가 교차리전 raw 스캔</td><td>사전집계 + 3쿼리 병렬화 + 누락지역 백그라운드 큐</td>
+      <td class="before">2,962ms</td><td class="after">365ms</td>
+    </tr><tr>
+      <td class="bold">hot path</td><td>KV 중앙스토어 읽기 지연이 매 응답에 ~15ms</td><td>엣지 캐시(Cache API) → colo 로컬 히트, 워커 미경유(cf-cache HIT)</td>
+      <td class="before">서버 ~19ms</td><td class="after">서버 ~6ms</td>
+    </tr><tr>
+      <td class="bold">네트워크 라우팅</td><td>Free 플랜은 한국 트래픽을 홍콩(HKG)으로 오프로드 → RTT 44ms</td><td>Pro 업그레이드 + api.zihado.com 커스텀 도메인 → 도쿄(NRT) 서빙</td>
+      <td class="before">HKG 44ms</td><td class="after">NRT 37ms</td>
+    </tr></tbody>
+</table>
+
+<h2>최종 측정 결과 (엔드포인트별 1,000회)</h2>
+<table>
+<thead><tr><th>엔드포인트</th><th>p50</th><th>p90</th><th>p95</th><th>p99</th><th>avg</th><th>min~max</th><th>&lt;50ms</th><th>응답크기</th><th>colo·cache</th><th>판정</th></tr></thead>
+<tbody><tr>
+      <td><code>stats</code></td>
+      <td>46.9</td><td>49.1</td><td class="bold">50.2</td><td>57.0</td>
+      <td>47.3</td><td>42.2~141.6</td>
+      <td>946/1000</td>
+      <td>108B <span class="dim">br</span></td>
+      <td>NRT · -</td>
+      <td><span class="badge" style="background:#d97706">OK</span></td>
+    </tr><tr>
+      <td><code>aptmap</code></td>
+      <td>47.9</td><td>50.2</td><td class="bold">51.4</td><td>57.3</td>
+      <td>48.4</td><td>43.3~282.1</td>
+      <td>892/1000</td>
+      <td>1.6KB <span class="dim">br</span></td>
+      <td>NRT · -</td>
+      <td><span class="badge" style="background:#d97706">OK</span></td>
+    </tr><tr>
+      <td><code>parcel</code></td>
+      <td>48.6</td><td>50.6</td><td class="bold">51.6</td><td>56.2</td>
+      <td>48.8</td><td>43.8~131.6</td>
+      <td>843/1000</td>
+      <td>33B <span class="dim">none</span></td>
+      <td>NRT · HIT</td>
+      <td><span class="badge" style="background:#d97706">OK</span></td>
+    </tr><tr>
+      <td><code>transactions</code></td>
+      <td>48.3</td><td>50.8</td><td class="bold">52.0</td><td>56.0</td>
+      <td>48.6</td><td>43.2~133.7</td>
+      <td>837/1000</td>
+      <td>1.1KB <span class="dim">br</span></td>
+      <td>NRT · -</td>
+      <td><span class="badge" style="background:#d97706">OK</span></td>
+    </tr><tr>
+      <td><code>aptsearch</code></td>
+      <td>49.0</td><td>51.3</td><td class="bold">52.2</td><td>58.8</td>
+      <td>49.4</td><td>44.0~129.5</td>
+      <td>764/1000</td>
+      <td>488B <span class="dim">br</span></td>
+      <td>NRT · -</td>
+      <td><span class="badge" style="background:#d97706">OK</span></td>
+    </tr><tr>
+      <td><code>coord</code></td>
+      <td>48.8</td><td>51.1</td><td class="bold">52.3</td><td>57.8</td>
+      <td>49.1</td><td>44.2~130.0</td>
+      <td>788/1000</td>
+      <td>49B <span class="dim">br</span></td>
+      <td>NRT · HIT</td>
+      <td><span class="badge" style="background:#d97706">OK</span></td>
+    </tr><tr>
+      <td><code>complex</code></td>
+      <td>48.8</td><td>51.2</td><td class="bold">52.6</td><td>59.3</td>
+      <td>49.3</td><td>43.5~151.2</td>
+      <td>759/1000</td>
+      <td>477B <span class="dim">br</span></td>
+      <td>NRT · -</td>
+      <td><span class="badge" style="background:#d97706">OK</span></td>
+    </tr><tr>
+      <td><code>overview_all</code></td>
+      <td>51.8</td><td>54.0</td><td class="bold">55.5</td><td>62.0</td>
+      <td>52.2</td><td>46.3~134.4</td>
+      <td>93/1000</td>
+      <td>6.1KB <span class="dim">br</span></td>
+      <td>NRT · -</td>
+      <td><span class="badge" style="background:#d97706">OK</span></td>
+    </tr><tr>
+      <td><code>statistics</code></td>
+      <td>51.5</td><td>54.5</td><td class="bold">55.8</td><td>61.7</td>
+      <td>51.9</td><td>45.2~151.4</td>
+      <td>193/1000</td>
+      <td>902B <span class="dim">br</span></td>
+      <td>NRT · -</td>
+      <td><span class="badge" style="background:#d97706">OK</span></td>
+    </tr><tr>
+      <td><code>recent</code></td>
+      <td>52.6</td><td>55.4</td><td class="bold">56.6</td><td>60.1</td>
+      <td>52.7</td><td>46.0~138.4</td>
+      <td>156/1000</td>
+      <td>20.1KB <span class="dim">br</span></td>
+      <td>NRT · -</td>
+      <td><span class="badge" style="background:#d97706">OK</span></td>
+    </tr><tr>
+      <td><code>transactions_range</code></td>
+      <td>54.7</td><td>58.0</td><td class="bold">59.7</td><td>66.8</td>
+      <td>55.2</td><td>49.1~129.2</td>
+      <td>2/1000</td>
+      <td>200B <span class="dim">br</span></td>
+      <td>NRT · -</td>
+      <td><span class="badge" style="background:#d97706">OK</span></td>
+    </tr><tr>
+      <td><code>nearby</code></td>
+      <td>59.0</td><td>63.3</td><td class="bold">65.3</td><td>70.7</td>
+      <td>59.6</td><td>51.5~133.1</td>
+      <td>0/1000</td>
+      <td>885B <span class="dim">br</span></td>
+      <td>NRT · HIT</td>
+      <td><span class="badge" style="background:#d97706">OK</span></td>
+    </tr><tr>
+      <td><code>overview_seoul</code></td>
+      <td>60.9</td><td>66.6</td><td class="bold">68.3</td><td>74.4</td>
+      <td>61.5</td><td>51.0~153.6</td>
+      <td>0/1000</td>
+      <td>1.3KB <span class="dim">br</span></td>
+      <td>NRT · -</td>
+      <td><span class="badge" style="background:#d97706">OK</span></td>
+    </tr><tr>
+      <td><code>complexes</code></td>
+      <td>61.2</td><td>66.4</td><td class="bold">68.3</td><td>75.8</td>
+      <td>61.8</td><td>53.0~141.4</td>
+      <td>0/1000</td>
+      <td>1.1KB <span class="dim">br</span></td>
+      <td>NRT · -</td>
+      <td><span class="badge" style="background:#d97706">OK</span></td>
+    </tr><tr>
+      <td><code>datasets</code></td>
+      <td>60.0</td><td>66.4</td><td class="bold">70.3</td><td>79.8</td>
+      <td>61.1</td><td>50.9~177.2</td>
+      <td>0/1000</td>
+      <td>314B <span class="dim">br</span></td>
+      <td>NRT · HIT</td>
+      <td><span class="badge" style="background:#d97706">OK</span></td>
+    </tr></tbody>
+</table>
+<p class="meta" style="margin-top:.6rem">단위 ms. colo=Cloudflare 서빙 데이터센터, cache=CDN 캐시 상태(HIT=워커 미경유).</p>
+
+<h2>병목 분석: 남은 시간은 어디로 가는가</h2>
+<div class="note">
+서버 처리는 <b>~6ms</b>까지 최적화 완료(사전집계 룩업 1~2ms + 엣지 캐시 HIT은 워커조차 미경유, <code>cf-cache-status: HIT</code>).<br><br>
+응답시간을 지배하는 건 <b>네트워크 왕복(RTT)</b>입니다. 이 머신→Cloudflare 서빙 colo:<br>
+• Free 플랜: 홍콩(HKG) <b>44ms</b> — 한국 트래픽 오프로드<br>
+• Pro + 커스텀 도메인: 도쿄(NRT) <b>37ms</b> ← 현재<br>
+• 서울(ICN): <b>5ms</b> — Cloudflare 자체 인프라(1.1.1.1)는 여기로 가지만, 고객 zone 애니캐스트(172.67.x)는 이 ISP 경로에서 NRT로 붙음. colo 선택은 BGP라 플랜으로 강제 불가.<br><br>
+즉 현재 end-to-end는 <b>NRT RTT 37ms + 처리 6ms ≈ 43~55ms</b>. 50ms 경계에 위치. 40ms 이하나 안정적 50ms 이하는 ICN 서빙(=5ms RTT)이 필요하며, 이는 BGP 라우팅에 달려 있어 애플리케이션·플랜으로는 추가 단축 불가.
+</div>
+</body></html>

@@ -6,7 +6,14 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "perf:smoke": "k6 run tests/performance/k6/scenarios/smoke.js",
+    "perf:load": "k6 run tests/performance/k6/scenarios/load.js",
+    "perf:stress": "k6 run tests/performance/k6/scenarios/stress.js",
+    "perf:validation": "k6 run tests/performance/k6/scenarios/validation.js",
+    "perf:all": "k6 run tests/performance/k6/scenarios/all.js",
+    "perf:all:prod": "WORKER_URL=https://your-worker.workers.dev k6 run tests/performance/k6/scenarios/all.js",
+    "perf:smoke:prod": "BASE_URL=https://your-domain.vercel.app k6 run tests/performance/k6/scenarios/smoke.js"
   },
   "dependencies": {
     "next": "16.2.9",

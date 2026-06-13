@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <title>API 성능 리포트 — landman</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+           background: #f8fafc; color: #1e293b; padding: 2rem; }
+    h1 { font-size: 1.5rem; margin-bottom: 0.25rem; }
+    .meta { color: #64748b; font-size: 0.875rem; margin-bottom: 2rem; }
+    table { width: 100%; border-collapse: collapse; background: white;
+            border-radius: 0.5rem; overflow: hidden;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+    th { background: #1e293b; color: white; padding: 0.75rem 1rem;
+         text-align: left; font-size: 0.8rem; text-transform: uppercase;
+         letter-spacing: 0.05em; }
+    td { padding: 0.75rem 1rem; border-bottom: 1px solid #e2e8f0;
+         font-size: 0.9rem; }
+    tr:last-child td { border-bottom: none; }
+    tr:hover td { background: #f1f5f9; }
+    code { font-family: "SF Mono", monospace; font-size: 0.85rem;
+           background: #f1f5f9; padding: 0.1rem 0.4rem; border-radius: 0.25rem; }
+    .bold { font-weight: 700; }
+    .badge { display: inline-block; color: white; font-size: 0.75rem;
+             font-weight: 700; padding: 0.2rem 0.5rem; border-radius: 9999px; }
+    .unit { color: #94a3b8; font-size: 0.75rem; }
+    .legend { display: flex; gap: 1rem; margin-top: 1.5rem; font-size: 0.8rem; }
+    .legend span { display: flex; align-items: center; gap: 0.4rem; }
+    .dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+  </style>
+</head>
+<body>
+  <h1>API 응답속도 리포트</h1>
+  <p class="meta">대상: https://api.zihado.com &nbsp;|&nbsp; 엔드포인트: 15개 &nbsp;|&nbsp; VU: 3, 반복: 10회/VU</p>
+  <table>
+    <thead>
+      <tr>
+        <th>이름</th>
+        <th>경로</th>
+        <th>avg <span class="unit">ms</span></th>
+        <th>p50 <span class="unit">ms</span></th>
+        <th>p95 <span class="unit">ms</span></th>
+        <th>p99 <span class="unit">ms</span></th>
+        <th>max <span class="unit">ms</span></th>
+        <th>상태</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><code>complex</code></td>
+        <td><code>/api/complex</code></td>
+        <td>87</td>
+        <td>59</td>
+        <td class="bold">346</td>
+        <td>0</td>
+        <td>349</td>
+        <td><span class="badge" style="background:#16a34a">OK</span></td>
+      </tr>
+      <tr>
+        <td><code>aptsearch</code></td>
+        <td><code>/api/aptsearch</code></td>
+        <td>77</td>
+        <td>59</td>
+        <td class="bold">239</td>
+        <td>0</td>
+        <td>303</td>
+        <td><span class="badge" style="background:#16a34a">OK</span></td>
+      </tr>
+      <tr>
+        <td><code>recent</code></td>
+        <td><code>/api/recent</code></td>
+        <td>79</td>
+        <td>75</td>
+        <td class="bold">110</td>
+        <td>0</td>
+        <td>118</td>
+        <td><span class="badge" style="background:#16a34a">OK</span></td>
+      </tr>
+      <tr>
+        <td><code>coord</code></td>
+        <td><code>/api/coord</code></td>
+        <td>60</td>
+        <td>58</td>
+        <td class="bold">90</td>
+        <td>0</td>
+        <td>100</td>
+        <td><span class="badge" style="background:#16a34a">OK</span></td>
+      </tr>
+      <tr>
+        <td><code>statistics</code></td>
+        <td><code>/api/statistics</code></td>
+        <td>66</td>
+        <td>67</td>
+        <td class="bold">78</td>
+        <td>0</td>
+        <td>82</td>
+        <td><span class="badge" style="background:#16a34a">OK</span></td>
+      </tr>
+      <tr>
+        <td><code>overview_seoul</code></td>
+        <td><code>/api/overview</code></td>
+        <td>59</td>
+        <td>57</td>
+        <td class="bold">70</td>
+        <td>0</td>
+        <td>90</td>
+        <td><span class="badge" style="background:#16a34a">OK</span></td>
+      </tr>
+      <tr>
+        <td><code>nearby</code></td>
+        <td><code>/api/nearby</code></td>
+        <td>58</td>
+        <td>57</td>
+        <td class="bold">68</td>
+        <td>0</td>
+        <td>73</td>
+        <td><span class="badge" style="background:#16a34a">OK</span></td>
+      </tr>
+      <tr>
+        <td><code>overview_all</code></td>
+        <td><code>/api/overview</code></td>
+        <td>59</td>
+        <td>59</td>
+        <td class="bold">68</td>
+        <td>0</td>
+        <td>70</td>
+        <td><span class="badge" style="background:#16a34a">OK</span></td>
+      </tr>
+      <tr>
+        <td><code>parcel</code></td>
+        <td><code>/api/parcel</code></td>
+        <td>56</td>
+        <td>55</td>
+        <td class="bold">67</td>
+        <td>0</td>
+        <td>68</td>
+        <td><span class="badge" style="background:#16a34a">OK</span></td>
+      </tr>
+      <tr>
+        <td><code>aptmap</code></td>
+        <td><code>/api/aptmap</code></td>
+        <td>57</td>
+        <td>56</td>
+        <td class="bold">66</td>
+        <td>0</td>
+        <td>78</td>
+        <td><span class="badge" style="background:#16a34a">OK</span></td>
+      </tr>
+      <tr>
+        <td><code>transactions</code></td>
+        <td><code>/api/transactions</code></td>
+        <td>58</td>
+        <td>58</td>
+        <td class="bold">65</td>
+        <td>0</td>
+        <td>71</td>
+        <td><span class="badge" style="background:#16a34a">OK</span></td>
+      </tr>
+      <tr>
+        <td><code>complexes</code></td>
+        <td><code>/api/complexes</code></td>
+        <td>57</td>
+        <td>57</td>
+        <td class="bold">64</td>
+        <td>0</td>
+        <td>67</td>
+        <td><span class="badge" style="background:#16a34a">OK</span></td>
+      </tr>
+      <tr>
+        <td><code>stats</code></td>
+        <td><code>/api/stats</code></td>
+        <td>56</td>
+        <td>56</td>
+        <td class="bold">64</td>
+        <td>0</td>
+        <td>65</td>
+        <td><span class="badge" style="background:#16a34a">OK</span></td>
+      </tr>
+      <tr>
+        <td><code>datasets</code></td>
+        <td><code>/api/datasets</code></td>
+        <td>56</td>
+        <td>57</td>
+        <td class="bold">64</td>
+        <td>0</td>
+        <td>64</td>
+        <td><span class="badge" style="background:#16a34a">OK</span></td>
+      </tr>
+      <tr>
+        <td><code>transactions_range</code></td>
+        <td><code>/api/transactions/range</code></td>
+        <td>56</td>
+        <td>56</td>
+        <td class="bold">62</td>
+        <td>0</td>
+        <td>63</td>
+        <td><span class="badge" style="background:#16a34a">OK</span></td>
+      </tr></tbody>
+  </table>
+  <div class="legend">
+    <span><span class="dot" style="background:#16a34a"></span> OK (p95 &lt; 500ms)</span>
+    <span><span class="dot" style="background:#d97706"></span> WARN (p95 500~2000ms)</span>
+    <span><span class="dot" style="background:#dc2626"></span> SLOW (p95 &gt; 2000ms)</span>
+  </div>
+</body>
+</html>
