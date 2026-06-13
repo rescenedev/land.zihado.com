@@ -106,7 +106,7 @@ function shiftDays(daysAgo: number): string {
 
 function respTtl(yyyymm: string, now = new Date()): number {
   const cur = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, "0")}`;
-  return yyyymm >= cur ? 60 * 60 * 12 : 60 * 60 * 24 * 7; // 당월 12시간(일1회 갱신·워밍 유지) / 과거 7일
+  return yyyymm >= cur ? 60 * 60 * 25 : 60 * 60 * 24 * 7; // 당월 25시간(일1회 cron 워밍 주기>24h 보장) / 과거 7일
 }
 
 // SubscriptionError → 403, 그 외 → 500 으로 일관 처리
@@ -303,7 +303,7 @@ app.get("/api/recent", async (c) => {
   if (!RE_YMD.test(yyyymm)) return c.json({ error: "yyyymm(YYYYMM) 필요" }, 400);
 
   // KV 응답 캐시: 당월 10분 / exactDate(확정) 6시간 / 과거 7일
-  const recentTtl = exactDate ? 6 * 3600 : (yyyymm >= curYmd() ? 600 : 7 * 24 * 3600);
+  const recentTtl = exactDate ? 25 * 3600 : (yyyymm >= curYmd() ? 25 * 3600 : 7 * 24 * 3600);
   const recentKey = `resp:recent:v2:${dataset}:${scope}:${yyyymm}:${exactDate ?? ""}:${limit}`;
   const payload = await cachedJson(c.env, recentKey, recentTtl, async () => {
     const codes = scope === "all" ? null : scopeCodes(scope);
