@@ -46,13 +46,13 @@ export function RegionCard({
       }`}
     >
       <div className="flex items-center justify-between">
-        <div className="flex items-center gap-1.5">
-          <span className="text-[15px] font-bold text-slate-100">{data.title}</span>
+        <div className="flex min-w-0 items-center gap-1.5">
+          <span className="shrink-0 whitespace-nowrap text-[15px] font-bold text-slate-100">{data.title}</span>
           {data.subtitle && (
-            <span className="text-xs text-slate-500">{data.subtitle}</span>
+            <span className="truncate whitespace-nowrap text-xs text-slate-500">{data.subtitle}</span>
           )}
           {hasNew && (
-            <span className={`ml-0.5 inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-bold ${
+            <span className={`ml-0.5 inline-flex shrink-0 items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-bold ${
               fresh ? "bg-blue-500/20 text-blue-300" : "bg-slate-700/50 text-slate-400"
             }`}>
               {fresh && <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-blue-400" />}
