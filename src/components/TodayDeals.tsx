@@ -54,7 +54,7 @@ export function TodayDeals() {
   const [date, setDate] = useState(todayStr());
   const [deals, setDeals] = useState<Transaction[]>([]);
   const [loading, setLoading] = useState(true);
-  const [selected, setSelected] = useState<{ region: string; apt: string } | null>(null);
+  const [selected, setSelected] = useState<{ region: string; apt: string; umdNm?: string; jibun?: string } | null>(null);
 
   const today = todayStr();
   const isToday = date === today;

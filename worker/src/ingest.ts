@@ -44,8 +44,10 @@ export async function ensureMonth(
   return { rows, source: "molit" };
 }
 
-// 사용자가 닿는 Vercel(ICN) 엣지 캐시를 ingest 직후 데움. 최근 3개월만(과거 백필 제외).
-const VERCEL = "https://land.zihado.com";
+// ingest 직후 워커 KV 직접 워밍. 워커(api.zihado.com) 자기 엔드포인트를 호출해 resp:* KV 를 채운다.
+// 단지모달은 워커 직접 호출이므로 반드시 워커 KV 를 데워야 HIT(이전엔 Vercel 워밍이라 모달엔 무효였음).
+// worker→Vercel→worker 루프 제거. 최근 3개월만(과거 백필 제외).
+const WARM_ORIGIN = "https://api.zihado.com";
 async function warmAfterIngest(
   dataset: string,
   sggCd: string,
@@ -56,15 +58,15 @@ async function warmAfterIngest(
   if (!recentMonths(3).includes(dealYmd)) return; // 최근 3개월만
   const from = shiftYmd(dealYmd, -11);
   const urls = [
-    `${VERCEL}/api/transactions?dataset=${dataset}&region=${sggCd}&yyyymm=${dealYmd}`,
-    `${VERCEL}/api/aptmap?dataset=${dataset}&region=${sggCd}&yyyymm=${dealYmd}&limit=40`,
-    `${VERCEL}/api/transactions/range?dataset=${dataset}&region=${sggCd}&from=${from}&to=${dealYmd}`,
-    `${VERCEL}/api/complexes?dataset=${dataset}&region=${sggCd}`,
+    `${WARM_ORIGIN}/api/transactions?dataset=${dataset}&region=${sggCd}&yyyymm=${dealYmd}`,
+    `${WARM_ORIGIN}/api/aptmap?dataset=${dataset}&region=${sggCd}&yyyymm=${dealYmd}&limit=40`,
+    `${WARM_ORIGIN}/api/transactions/range?dataset=${dataset}&region=${sggCd}&from=${from}&to=${dealYmd}`,
+    `${WARM_ORIGIN}/api/complexes?dataset=${dataset}&region=${sggCd}`,
   ];
-  // 갱신된 단지들의 단지 상세 모달도 즉시 워밍(실거래 찍힌 단지)
+  // 갱신된 단지들의 단지 상세 모달도 즉시 워밍(실거래 찍힌 단지) → 워커 KV → 모달 직접호출 HIT
   const apts = [...new Set(rows.map((r) => r.aptName).filter(Boolean))];
   for (const apt of apts)
-    urls.push(`${VERCEL}/api/complex?dataset=${dataset}&region=${sggCd}&apt=${encodeURIComponent(apt)}&from=${from}&to=${dealYmd}`);
+    urls.push(`${WARM_ORIGIN}/api/complex?dataset=${dataset}&region=${sggCd}&apt=${encodeURIComponent(apt)}&from=${from}&to=${dealYmd}`);
   await Promise.allSettled(urls.map((u) => fetch(u)));
 }
 
