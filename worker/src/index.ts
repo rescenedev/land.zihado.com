@@ -882,21 +882,21 @@ export default {
   fetch: app.fetch,
 
   // 1일 1회(분 stagger). subrequest 한도(1000/invocation) 회피 위해 워밍을 cron 별로 분할.
-  //   30 0 → 백필(당월+전월) + 코어 워밍(대시보드/통계/오늘의실거래 전국·서울 30일)
+  //   30 0 → 백필(당월+전월) + 코어 워밍(대시보드/통계/오늘의실거래 전국·서울 30일, 전 데이터셋)
   //   32 0 → 오늘의실거래 시도탭 aptTrade × 31일 (16시도 = 496요청)
-  //   34 0 → 오늘의실거래 시도탭 aptRent  × 31일
-  //   36 0 → 오늘의실거래 시도탭 silvTrade × 31일
+  //   34 0 → 지역상세 당월: 거래목록+단지지도+추이+단지목록 (128×4 = 512요청)
+  //   36 0 → 지역상세 과거2월: 거래목록+단지지도 (128×2×2 = 512요청)
   //   42 0 → 단지 상세 모달 KV 워밍(큐 분산)
-  // ⚠️ 지역(시군구 거래목록/단지지도)·과거월은 128시군구×다엔드포인트=수천 URL → CDN(~2천) thrash
-  //    → CDN 워밍에서 제외(워커 KV 큐 + 프론트 점진렌더 + SWR 7일로 처리).
-  //    오늘의실거래 시도탭은 bounded(데이터셋당 496) 라 한달치 전체를 CDN 에 워밍해도 안전.
+  // CDN 용량은 2천 한계 아님(실측: today's-deals 1674 + 지역상세 512 + 코어 동시 sticky HIT 확인).
+  // → long-tail(지역상세·시도탭)도 CDN+KV 에 워밍해 콜드 제거. 각 cron 은 subrequest 한도 내(≤512).
+  // 참고: aptRent/silvTrade 시도탭은 트래픽 적어 cron 제외(warmCore 가 전국/서울은 커버, SWR 7일).
   async scheduled(event: ScheduledController, env: Env, ctx: ExecutionContext) {
     if (event.cron === "32 0 * * *") {
       ctx.waitUntil(warmRecentSido(["aptTrade"]));
     } else if (event.cron === "34 0 * * *") {
-      ctx.waitUntil(warmRecentSido(["aptRent"]));
+      ctx.waitUntil(warmRegions());        // 지역상세 당월
     } else if (event.cron === "36 0 * * *") {
-      ctx.waitUntil(warmRecentSido(["silvTrade"]));
+      ctx.waitUntil(warmRegionsPast());    // 지역상세 과거 2개월(기준월 네비)
     } else if (event.cron === "42 0 * * *") {
       ctx.waitUntil(enqueueComplexWarm(env)); // 단지 상세 모달 KV 워밍(당월 단지 전부, 큐 분산)
     } else {
