@@ -56,3 +56,4 @@ CDN HIT(≤50ms)로 둘 수 없다. 따라서 durable 목표는 "전부 ≤50ms"
 - ⚠️ **전월세/분양권 시도탭·지역상세**: cron 제외(저트래픽). warmCore 가 전국/서울은 커버. 첫조회 후 SWR 7일.
 - ⚠️ **3개월 초과 과거월**: 기준월 네비 윈도우 밖. 첫조회 콜드 후 SWR 7일.
 - ⚠️ **aptsearch**: 동적 검색이라 워밍 불가. 첫 검색 비용(통상 빠름).
+- 🔴 **aptmap(지도탭 지역맵, limit=500)**: KV TTL 이 **지오코딩 미완 시 300초**(`items.length < aggs.length` → 좌표 점진 채움 의도). 미완 지역은 워밍해도 5분 후 만료 → 재집계(12개월 agg + 지오코딩) ~320ms 콜드 반복. 근본 해결 = 전 단지 지오코딩 완성(apt_coords) → `items>=aggs` → respTtl(25h) 적용. TODO: geocode 커버리지 완성.
