@@ -75,18 +75,22 @@ COLD_CORE = 150      # 코어 MISS>150 = 진짜 갭(핫셋이 콜드면 안 됨)
 COLD_TAIL = 500      # long-tail MISS>500 = 진짜 갭. 150~500 = colo cold-read(정상, CF 구조)
 def cold_thr(label):
     return COLD_CORE if label in CORE_LABELS else COLD_TAIL
+HOST_CORE = "land.zihado.com"   # 코어: 사용자 경로(Vercel CDN) 측정
+HOST_TAIL = "api.zihado.com"    # long-tail: 워커 직결(KV) 측정 — 프록시로 재면 CDN 오염→코어 evict
 def run(n=8):
     ctx = ssl.create_default_context()
-    conn = http.client.HTTPSConnection(HOST, context=ctx, timeout=60)
+    conns = {HOST_CORE: http.client.HTTPSConnection(HOST_CORE, context=ctx, timeout=60),
+             HOST_TAIL: http.client.HTTPSConnection(HOST_TAIL, context=ctx, timeout=60)}
     hdr = {"User-Agent": "Mozilla/5.0", "Connection": "keep-alive"}
     ts = datetime.datetime.now().strftime("%H:%M:%S")
     cold = []   # 진짜 갭(유형별 임계 초과 MISS)
     total = 0
-    print(f"=== {ts} (엔드포인트 {len(ENDPOINTS)} × ~{n} 샘플, 첫조회; 코어>{COLD_CORE} / long-tail>{COLD_TAIL} = 갭) ===")
+    print(f"=== {ts} (코어=프록시 / long-tail=워커직결, 첫조회; 코어>{COLD_CORE} / tail>{COLD_TAIL} = 갭) ===")
     for label, gen in ENDPOINTS:
         worst = None
         ncold = 0
         thr = cold_thr(label)
+        host = HOST_CORE if label in CORE_LABELS else HOST_TAIL
         for _ in range(n):
             path = gen()
             if not path:
@@ -94,12 +98,12 @@ def run(n=8):
             total += 1
             try:
                 t0 = time.time()
-                conn.request("GET", path, headers=hdr)
-                r = conn.getresponse(); r.read()
+                conns[host].request("GET", path, headers=hdr)
+                r = conns[host].getresponse(); r.read()
                 ms = (time.time() - t0) * 1000
-                vc = r.getheader("x-vercel-cache")
+                vc = r.getheader("x-vercel-cache") or r.getheader("x-edge-cache")
             except Exception as e:
-                conn = http.client.HTTPSConnection(HOST, context=ctx, timeout=60)
+                conns[host] = http.client.HTTPSConnection(host, context=ctx, timeout=60)
                 cold.append((label, "ERR", str(e)[:40]))
                 continue
             if worst is None or ms > worst[0]:
