@@ -131,14 +131,32 @@ export async function handleJob(env: Env, job: BackfillJob): Promise<void> {
     return;
   }
   if (job.type === "warmcomplex" && job.apt && job.dealYmd) {
-    // 단지 상세 모달 KV 워밍: 워커 /api/complex 를 호출해 resp:complex 키를 채운다.
-    // (모달은 워커 직접 호출 → KV HIT 시 D1 스캔 회피·서버 ~5ms). 큐로 분산해 subrequest 한도 회피.
+    // 단지 상세 모달 워밍: 모달이 누르는 순간 부르는 3종(complex 거래 + coord 좌표 + nearby 주변시설)을
+    // 프론트와 동일 경로(land.zihado.com 프록시)로 구워 Vercel CDN + 워커 KV 양 레이어 HIT.
+    // coord 는 D1(apt_coords), nearby 는 KV(30일) 캐시 → Kakao 호출은 단지당 1회뿐.
     const ds = job.dataset ?? DEFAULT_DATASET;
     const from = shiftYmd(job.dealYmd, -11);
-    await fetch(
-      `https://api.zihado.com/api/complex?dataset=${ds}&region=${job.sggCd}` +
+    const PROXY = "https://land.zihado.com";
+    const r = await fetch(
+      `${PROXY}/api/complex?dataset=${ds}&region=${job.sggCd}` +
       `&apt=${encodeURIComponent(job.apt)}&from=${from}&to=${job.dealYmd}`
     );
+    // 거래에서 대표 지번(umd/jibun)을 뽑아 좌표·주변시설까지 사전 워밍 (모달 흐름과 동일).
+    try {
+      const body = (await r.json()) as { deals?: { umdNm?: string; jibun?: string }[] };
+      const deals = body.deals ?? [];
+      const rep = deals.find((d) => d.jibun) ?? deals[0];
+      if (rep?.umdNm) {
+        const p = new URLSearchParams({ region: job.sggCd, umd: rep.umdNm, jibun: rep.jibun ?? "", apt: job.apt });
+        const cr = await fetch(`${PROXY}/api/coord?${p.toString()}`);
+        const ll = (await cr.json()) as { lat?: number; lng?: number };
+        if (typeof ll.lat === "number" && typeof ll.lng === "number") {
+          await fetch(`${PROXY}/api/nearby?lat=${ll.lat}&lng=${ll.lng}`);
+        }
+      }
+    } catch {
+      // coord/nearby 워밍 실패는 무시(복원력) — complex 거래는 이미 구워짐.
+    }
     return;
   }
   if (job.type === "trades" && job.dealYmd) {

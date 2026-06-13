@@ -775,7 +775,7 @@ async function warmRegions(): Promise<void> {
   const paths: string[] = [];
   for (const cd of SGG_CODES) {
     paths.push(`/api/transactions?dataset=aptTrade&region=${cd}&yyyymm=${curM}`);
-    paths.push(`/api/aptmap?dataset=aptTrade&region=${cd}&yyyymm=${curM}&limit=40`);
+    paths.push(`/api/aptmap?dataset=aptTrade&region=${cd}&yyyymm=${curM}&limit=500`); // 프론트 fetchAptMap 과 동일 키
     paths.push(`/api/transactions/range?dataset=aptTrade&region=${cd}&from=${from}&to=${curM}`);
     paths.push(`/api/complexes?dataset=aptTrade&region=${cd}`);
   }
@@ -789,7 +789,7 @@ async function warmRegionsPast(): Promise<void> {
   for (const ym of past) {
     for (const cd of SGG_CODES) {
       paths.push(`/api/transactions?dataset=aptTrade&region=${cd}&yyyymm=${ym}`);
-      paths.push(`/api/aptmap?dataset=aptTrade&region=${cd}&yyyymm=${ym}&limit=40`);
+      paths.push(`/api/aptmap?dataset=aptTrade&region=${cd}&yyyymm=${ym}&limit=500`); // 프론트 fetchAptMap 과 동일 키
     }
   }
   await warmPaths(paths);
