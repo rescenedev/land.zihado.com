@@ -226,9 +226,9 @@ app.get("/api/overview", async (c) => {
   };
   const payload = { dataset, yyyymm, scope, totals, regions };
 
-  // 완료: 당월 30분 / 과거 7일. 수집 중: 60초 (KV 최소 TTL=60)
+  // 완료: 당월 25시간(일일 cron 워밍 주기>24h 보장) / 과거 7일. 수집 중: 60초 (KV 최소 TTL=60)
   const ovTtl = totals.loaded >= totals.regions
-    ? (yyyymm >= curYmd() ? 1800 : 60 * 60 * 24 * 7)
+    ? (yyyymm >= curYmd() ? 60 * 60 * 25 : 60 * 60 * 24 * 7)
     : 60;
   c.executionCtx.waitUntil(
     c.env.CACHE.put(ovKey, JSON.stringify(payload), { expirationTtl: ovTtl })
@@ -708,13 +708,17 @@ const WARM_SIDOS = [
   "all", "seoul", "경기", "인천", "부산", "대구", "광주", "대전", "울산",
   "세종", "강원", "충북", "충남", "전북", "전남", "경북", "경남", "제주",
 ];
-// 사용자가 닿는 Vercel(ICN) 엣지 캐시만 데움(MISS는 CF까지 채워 양쪽 레이어 동시 워밍).
-// CF Worker subrequest 한도(1000/호출)를 넘기지 않도록 워밍 세트를 당월 중심으로 한정.
+// 워밍 대상 베이스:
+//  - VERCEL_BASE(프록시): Vercel CDN + 워커 KV 동시 워밍. 핫 bounded(core) 전용.
+//  - WORKER_BASE(워커 직결): 워커 KV 만 워밍. long-tail(지역·시도탭) 전용 →
+//    ⚠️ long-tail 을 CDN 에 구우면 CDN(용량 한계·LRU)이 핫 코어를 evict 한다(실측 확인).
+//    long-tail 은 KV(무한)만 채우고, 프록시 MISS 는 워커 KV HIT(~60-120ms)로 처리.
 const VERCEL_BASE = "https://land.zihado.com";
+const WORKER_BASE = "https://api.zihado.com";
 
-// Vercel(→CF 캐스케이드) 경로들을 동시 12개씩 fetch. subrequest 한도 내 완료 보장용.
-async function warmPaths(paths: string[]): Promise<void> {
-  const all = paths.map((p) => VERCEL_BASE + p);
+// 경로들을 동시 12개씩 fetch. subrequest 한도 내 완료 보장용. base 로 CDN 포함 여부 결정.
+async function warmPaths(paths: string[], base: string = VERCEL_BASE): Promise<void> {
+  const all = paths.map((p) => base + p);
   const CONC = 12;
   for (let i = 0; i < all.length; i += CONC) {
     await Promise.allSettled(all.slice(i, i + CONC).map((u) => fetch(u)));
@@ -764,7 +768,7 @@ async function warmRecentSido(dsets: string[], days = RECENT_WARM_DAYS): Promise
         paths.push(`/api/recent?dataset=${ds}&scope=${encodeURIComponent(s)}&yyyymm=${ym}&limit=300&date=${d}`);
     }
   }
-  await warmPaths(paths); // ds당 31×16=496 요청 → 한도 내
+  await warmPaths(paths, WORKER_BASE); // long-tail → 워커 KV 만(CDN 코어 evict 방지). ds당 496 요청
 }
 
 // cron B (지역-당월): 거래목록 + 단지지도 + 12개월 추이 + 단지목록. 128 × 4 = ~512 요청.
@@ -779,7 +783,7 @@ async function warmRegions(): Promise<void> {
     paths.push(`/api/transactions/range?dataset=aptTrade&region=${cd}&from=${from}&to=${curM}`);
     paths.push(`/api/complexes?dataset=aptTrade&region=${cd}`);
   }
-  await warmPaths(paths);
+  await warmPaths(paths, WORKER_BASE); // 지역상세 long-tail → 워커 KV 만
 }
 
 // cron D (지역-과거월): 거래목록 + 단지지도 × 과거 2개월(기준월 네비). 128 × 2 × 2 = ~512 요청.
@@ -792,7 +796,7 @@ async function warmRegionsPast(): Promise<void> {
       paths.push(`/api/aptmap?dataset=aptTrade&region=${cd}&yyyymm=${ym}&limit=500`); // 프론트 fetchAptMap 과 동일 키
     }
   }
-  await warmPaths(paths);
+  await warmPaths(paths, WORKER_BASE); // 지역상세 과거월 long-tail → 워커 KV 만
 }
 
 // cron E (단지 상세): 실거래 찍힌 단지(단지 상세 모달)를 미리 굽는다.

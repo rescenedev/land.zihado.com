@@ -136,7 +136,9 @@ export async function handleJob(env: Env, job: BackfillJob): Promise<void> {
     // coord 는 D1(apt_coords), nearby 는 KV(30일) 캐시 → Kakao 호출은 단지당 1회뿐.
     const ds = job.dataset ?? DEFAULT_DATASET;
     const from = shiftYmd(job.dealYmd, -11);
-    const PROXY = "https://land.zihado.com";
+    // long-tail(단지 수천 개) → 워커 직결로 KV 만 워밍. 프록시로 구우면 Vercel CDN(용량 한계)이
+    // 핫 코어를 evict 한다. 프록시 MISS 는 워커 KV HIT(~60-120ms)로 처리.
+    const PROXY = "https://api.zihado.com";
     const r = await fetch(
       `${PROXY}/api/complex?dataset=${ds}&region=${job.sggCd}` +
       `&apt=${encodeURIComponent(job.apt)}&from=${from}&to=${job.dealYmd}`
