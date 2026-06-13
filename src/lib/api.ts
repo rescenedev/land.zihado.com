@@ -214,7 +214,7 @@ export type Nearby = {
 };
 
 export async function fetchNearby(lat: number, lng: number): Promise<Nearby | null> {
-  const e = await cachedGet(`${API_BASE}/api/nearby?lat=${lat}&lng=${lng}`);
+  const e = await cachedGet(`${CACHED_BASE}/api/nearby?lat=${lat}&lng=${lng}`);
   return e.ok ? (e.data as Nearby) : null;
 }
 
@@ -225,7 +225,7 @@ export async function fetchCoord(
   apt: string
 ): Promise<{ lat: number; lng: number } | null> {
   const p = new URLSearchParams({ region, umd, jibun, apt });
-  const e = await cachedGet(`${API_BASE}/api/coord?${p.toString()}`);
+  const e = await cachedGet(`${CACHED_BASE}/api/coord?${p.toString()}`);
   const d = e.data as { lat?: number; lng?: number };
   return e.ok && typeof d.lat === "number" ? (d as { lat: number; lng: number }) : null;
 }
@@ -253,7 +253,7 @@ export async function fetchComplexDeals(
   dataset = "aptTrade"
 ): Promise<Transaction[]> {
   const e = await cachedGet(
-    `${API_BASE}/api/complex?dataset=${dataset}&region=${region}&apt=${encodeURIComponent(
+    `${CACHED_BASE}/api/complex?dataset=${dataset}&region=${region}&apt=${encodeURIComponent(
       apt
     )}&from=${from}&to=${to}`
   );
