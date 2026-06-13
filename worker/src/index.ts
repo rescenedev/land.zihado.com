@@ -72,9 +72,12 @@ app.use("*", async (c, next) => {
   }
   await next();
   const res = c.res;
-  if (res.status === 200 && res.headers.get("Cache-Control") !== "no-store") {
+  const existingCC = res.headers.get("Cache-Control");
+  if (res.status === 200 && existingCC !== "no-store") {
     const stored = new Response(res.clone().body, res);
-    stored.headers.set("Cache-Control", `public, max-age=${ttl}`);
+    // 핸들러가 max-age 를 직접 지정했으면 존중(예: 과거 날짜 장기캐시), 아니면 기본 ttl
+    const cc = existingCC && existingCC.includes("max-age") ? existingCC : `public, max-age=${ttl}`;
+    stored.headers.set("Cache-Control", cc);
     c.executionCtx.waitUntil(cache.put(cacheKey, stored.clone()));
     stored.headers.set("x-edge-cache", "MISS");
     c.res = stored;
@@ -87,6 +90,13 @@ const RE_YMD = /^\d{6}$/;
 // KV 응답 캐시 TTL: 당월/최근은 짧게(신선도), 과거는 길게
 function curYmd(now = new Date()): string {
   return `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, "0")}`;
+}
+
+// N일 전 날짜 YYYYMMDD (cron recent 워밍용)
+function shiftDays(daysAgo: number): string {
+  const d = new Date();
+  d.setDate(d.getDate() - daysAgo);
+  return `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, "0")}${String(d.getDate()).padStart(2, "0")}`;
 }
 
 function respTtl(yyyymm: string, now = new Date()): number {
@@ -240,7 +250,7 @@ app.get("/api/statistics", async (c) => {
   if (kvHit) {
     const { _loaded, _total, ...stats } = kvHit;
     // 항상 엣지/프록시 캐시 허용. 미완이면 짧게(30s)·완료면 60s → coverage 신선도와 속도 양립
-    const cc = _loaded >= _total ? "public, max-age=60" : "public, max-age=30";
+    const cc = _loaded >= _total ? "public, max-age=1800" : "public, max-age=600";
     return c.json(
       { dataset, yyyymm, scope, coverage: { loaded: _loaded, total: _total }, ...stats },
       200, { "Cache-Control": cc }
@@ -268,7 +278,7 @@ app.get("/api/statistics", async (c) => {
     )
   );
 
-  const cc = loaded >= codes.length ? "public, max-age=60" : "public, max-age=30";
+  const cc = loaded >= codes.length ? "public, max-age=1800" : "public, max-age=600";
   return c.json(
     { dataset, yyyymm, scope, coverage: { loaded, total: codes.length }, ...stats },
     200, { "Cache-Control": cc }
@@ -295,11 +305,13 @@ app.get("/api/recent", async (c) => {
     const deals = await recentDeals(c.env, dataset, yyyymm, codes, limit, exactDate);
     // 게임화: 단지별 직전 최고가/마지막 거래일 → 상승률·신고가·갱신 간격
     const names = [...new Set(deals.map((d) => d.aptName).filter(Boolean))];
+    // 거래에 등장한 시군구만 → enrichment 스캔 범위를 해당 지역으로 한정(전국 스캔 차단)
+    const sggs = [...new Set(deals.map((d) => d.sggCd).filter(Boolean) as string[])];
     // 최근 6개월 월평균 시계열(스파크라인) + 직전 최고가
     const months = Array.from({ length: 6 }, (_, i) => shiftYmd(yyyymm, -(5 - i)));
     const [prior, series] = await Promise.all([
-      aptPriorStats(c.env, dataset, yyyymm, names),
-      aptMonthlySeries(c.env, dataset, months[0], yyyymm, names),
+      aptPriorStats(c.env, dataset, yyyymm, names, sggs),
+      aptMonthlySeries(c.env, dataset, months[0], yyyymm, names, sggs),
     ]);
     const enriched = deals.map((d) => {
       const key = `${d.sggCd}|${d.aptName}`;
@@ -316,7 +328,11 @@ app.get("/api/recent", async (c) => {
     const latest = enriched[0]?.dealDate ?? "";
     return { dataset, yyyymm, scope, date: exactDate ?? null, latest, count: enriched.length, deals: enriched };
   });
-  return c.json(payload);
+  // 과거 확정일(exactDate)은 불변 → 장기 캐시(6h). 당월/최신은 짧게.
+  const cc = exactDate && exactDate.slice(0, 7).replace("-", "") < curYmd()
+    ? "public, max-age=21600"
+    : (exactDate ? "public, max-age=3600" : "public, max-age=300");
+  return c.json(payload, 200, { "Cache-Control": cc });
 });
 
 app.get("/api/transactions", async (c) => {
@@ -667,26 +683,52 @@ app.post("/api/admin/backfill", async (c) => {
   return c.json({ enqueued: jobs.length, months, datasets: enabledDatasets().map((d) => d.key) });
 });
 
+// 캐시 워밍 즉시 트리거 (cron 안 기다리고 Vercel+CF 전부 데움)
+app.post("/api/admin/warm", async (c) => {
+  c.executionCtx.waitUntil(warmCaches(c.env));
+  return c.json({ ok: true, started: true });
+});
+
 // 자체 엔드포인트 호출로 KV 응답 캐시 워밍 (콜드 제거)
 const SELF = "https://landman-worker.zihado.workers.dev";
 const WARM_SIDOS = [
   "all", "seoul", "경기", "인천", "부산", "대구", "광주", "대전", "울산",
   "세종", "강원", "충북", "충남", "전북", "전남", "경북", "경남", "제주",
 ];
+// 사용자가 닿는 Vercel(ICN) 엣지 캐시만 데움(MISS는 CF까지 채워 양쪽 레이어 동시 워밍).
+// CF Worker subrequest 한도(1000/호출)를 넘기지 않도록 워밍 세트를 당월 중심으로 한정.
+const VERCEL_BASE = "https://land.zihado.com";
 async function warmCaches(env: Env): Promise<void> {
-  const months = recentMonths(3);
-  const urls: string[] = [];
-  // 오늘의 실거래(recent) - 당월 cold miss 방지
-  urls.push(`${SELF}/api/recent?scope=all&yyyymm=${months[months.length - 1]}&dataset=aptTrade&limit=150`);
-  for (const ym of months) {
-    urls.push(`${SELF}/api/overview?scope=all&yyyymm=${ym}&dataset=aptTrade`);
-    urls.push(`${SELF}/api/overview?scope=seoul&yyyymm=${ym}&dataset=aptTrade`);
+  const curM = curYmd();
+  const dsets = enabledDatasets().map((d) => d.key); // 매매/전월세/분양권
+  // ⚠️ URL 파라미터 순서·값을 프론트(src/lib/api.ts)와 정확히 일치 → 같은 캐시 키.
+  const paths: string[] = [];
+  for (const ds of dsets) {
+    paths.push(`/api/overview?dataset=${ds}&scope=all&yyyymm=${curM}`);
+    paths.push(`/api/overview?dataset=${ds}&scope=seoul&yyyymm=${curM}`);
     for (const s of WARM_SIDOS)
-      urls.push(`${SELF}/api/statistics?scope=${encodeURIComponent(s)}&yyyymm=${ym}&dataset=aptTrade`);
+      paths.push(`/api/statistics?dataset=${ds}&scope=${encodeURIComponent(s)}&yyyymm=${curM}`);
+    // 오늘의 실거래(TodayDeals): limit=300, date 항상 포함. 전국=30일, 시도탭=최근 3일.
+    for (let i = 0; i < 30; i++) {
+      const dt = shiftDays(i);
+      if (!dt) continue;
+      const ym = dt.slice(0, 6);
+      const d = `${dt.slice(0, 4)}-${dt.slice(4, 6)}-${dt.slice(6, 8)}`;
+      const scopes = i < 3 ? WARM_SIDOS : ["all", "seoul"];
+      for (const s of scopes)
+        paths.push(`/api/recent?dataset=${ds}&scope=${encodeURIComponent(s)}&yyyymm=${ym}&limit=300&date=${d}`);
+    }
   }
-  const CONC = 8;
-  for (let i = 0; i < urls.length; i += CONC) {
-    await Promise.allSettled(urls.slice(i, i + CONC).map((u) => fetch(u)));
+  // 시군구 상세: 거래목록 + 단지지도(주 화면) 당월. aptTrade 만(주 데이터셋).
+  for (const cd of SGG_CODES) {
+    paths.push(`/api/transactions?dataset=aptTrade&region=${cd}&yyyymm=${curM}`);
+    paths.push(`/api/aptmap?dataset=aptTrade&region=${cd}&yyyymm=${curM}&limit=40`);
+  }
+  // Vercel 만 워밍(→CF 캐스케이드). subrequest 한도 내로 유지.
+  const all = paths.map((p) => VERCEL_BASE + p);
+  const CONC = 12;
+  for (let i = 0; i < all.length; i += CONC) {
+    await Promise.allSettled(all.slice(i, i + CONC).map((u) => fetch(u)));
   }
 }
 

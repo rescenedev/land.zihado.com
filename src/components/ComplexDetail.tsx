@@ -5,12 +5,12 @@ import {
   fetchComplexDeals,
   fetchCoord,
   fetchNearby,
-  fetchParcel,
   shiftMonth,
   type Transaction,
   type Nearby,
   type Parcel,
 } from "@/lib/api";
+import { fetchParcelClient } from "@/lib/vworld-client";
 import { formatDeal, formatEok, pyeong } from "@/lib/format";
 import { Sparkline } from "./Sparkline";
 import { MiniMap, type MapMarker } from "./MiniMap";
@@ -62,7 +62,7 @@ export function ComplexDetail({
       if (!alive || !c) return;
       setCoord(c);
       fetchNearby(c.lat, c.lng).then((n) => alive && setNearby(n));
-      fetchParcel(c.lat, c.lng).then((p) => alive && setParcel(p));
+      fetchParcelClient(c.lat, c.lng).then((p) => alive && setParcel(p));
     });
     return () => { alive = false; };
   }, [region, apt, umdNmProp, jibunProp]);
@@ -77,7 +77,7 @@ export function ComplexDetail({
       if (!alive || !c) return;
       setCoord(c);
       fetchNearby(c.lat, c.lng).then((n) => alive && setNearby(n));
-      fetchParcel(c.lat, c.lng).then((p) => alive && setParcel(p));
+      fetchParcelClient(c.lat, c.lng).then((p) => alive && setParcel(p));
     });
     return () => {
       alive = false;

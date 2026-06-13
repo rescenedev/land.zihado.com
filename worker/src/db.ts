@@ -138,15 +138,27 @@ export async function recentDeals(
 
 // 단지별 직전(이번 달 이전) 최고가 + 마지막 거래일 — 오늘의 실거래 게임화용.
 // keys: "sgg_cd|apt_name" 형태. 결과 Map 동일 키.
+// 5자리 숫자 시군구 코드만 골라 SQL IN 리터럴로 생성(바인드 변수 절약·인젝션 안전).
+function sggList5(sggCds?: string[]): string {
+  if (!sggCds || sggCds.length === 0) return "";
+  const safe = sggCds.filter((c) => /^\d{5}$/.test(c));
+  return safe.length > 0 ? safe.map((c) => `'${c}'`).join(",") : "";
+}
+
 export async function aptPriorStats(
   env: Env,
   dataset: string,
   beforeYmd: string,
-  aptNames: string[]
+  aptNames: string[],
+  sggCds?: string[]
 ): Promise<Map<string, { max: number; lastDate: string }>> {
   const out = new Map<string, { max: number; lastDate: string }>();
   if (aptNames.length === 0) return out;
   const amt = `(CASE WHEN deal_amount>0 THEN deal_amount ELSE deposit END)`;
+  // sgg_cd 까지 좁히면 흔한 단지명(자이/푸르지오 등)의 전국 스캔을 차단 → 스캔량 급감.
+  // sgg는 검증된 5자리 숫자라 리터럴 인라인(바인드 제외) → D1 변수 100개 한도 회피.
+  const sggIn = sggList5(sggCds);
+  const sggFilter = sggIn ? ` AND sgg_cd IN (${sggIn})` : "";
   // D1 바인드 변수 한도(약 100개) 회피: 청크 분할. 청크는 병렬 조회(교차리전 왕복 누적 방지)
   const chunks: string[][] = [];
   for (let i = 0; i < aptNames.length; i += 80) chunks.push(aptNames.slice(i, i + 80));
@@ -156,7 +168,7 @@ export async function aptPriorStats(
       return env.DB.prepare(
         `SELECT sgg_cd, apt_name, MAX(${amt}) AS mx, MAX(deal_date) AS lastd
          FROM transactions
-         WHERE dataset=? AND deal_ymd < ? AND apt_name IN (${ph})
+         WHERE dataset=? AND deal_ymd < ? AND apt_name IN (${ph})${sggFilter}
          GROUP BY sgg_cd, apt_name`
       ).bind(dataset, beforeYmd, ...chunk).all();
     })
@@ -223,22 +235,29 @@ export async function aptMonthlySeries(
   dataset: string,
   fromYmd: string,
   toYmd: string,
-  aptNames: string[]
+  aptNames: string[],
+  sggCds?: string[]
 ): Promise<Map<string, Map<string, number>>> {
   const out = new Map<string, Map<string, number>>();
   if (aptNames.length === 0) return out;
   const amt = `(CASE WHEN deal_amount>0 THEN deal_amount ELSE deposit END)`;
-  for (let i = 0; i < aptNames.length; i += 80) {
-    const chunk = aptNames.slice(i, i + 80);
-    const ph = chunk.map(() => "?").join(",");
-    const { results } = await env.DB.prepare(
-      `SELECT sgg_cd, apt_name, deal_ymd, ROUND(AVG(${amt})) AS a
-       FROM transactions
-       WHERE dataset=? AND deal_ymd BETWEEN ? AND ? AND apt_name IN (${ph})
-       GROUP BY sgg_cd, apt_name, deal_ymd`
-    )
-      .bind(dataset, fromYmd, toYmd, ...chunk)
-      .all();
+  const sggIn = sggList5(sggCds);
+  const sggFilter = sggIn ? ` AND sgg_cd IN (${sggIn})` : "";
+  // 청크 병렬 조회 (순차 await → 교차리전 왕복 누적 제거)
+  const chunks: string[][] = [];
+  for (let i = 0; i < aptNames.length; i += 80) chunks.push(aptNames.slice(i, i + 80));
+  const parts = await Promise.all(
+    chunks.map((chunk) => {
+      const ph = chunk.map(() => "?").join(",");
+      return env.DB.prepare(
+        `SELECT sgg_cd, apt_name, deal_ymd, ROUND(AVG(${amt})) AS a
+         FROM transactions
+         WHERE dataset=? AND deal_ymd BETWEEN ? AND ? AND apt_name IN (${ph})${sggFilter}
+         GROUP BY sgg_cd, apt_name, deal_ymd`
+      ).bind(dataset, fromYmd, toYmd, ...chunk).all();
+    })
+  );
+  for (const { results } of parts) {
     for (const r of results as { sgg_cd: string; apt_name: string; deal_ymd: string; a: number }[]) {
       const k = `${r.sgg_cd}|${r.apt_name}`;
       if (!out.has(k)) out.set(k, new Map());
@@ -554,36 +573,6 @@ export async function computeStatsSql(
   const where = `dataset=? AND deal_ymd=? AND ${AMT}>0${scopeSqlFilter(scope)}${rentFilter}`;
   const b = [dataset, yyyymm];
 
-  const sum = await env.DB.prepare(
-    `SELECT COUNT(*) n, CAST(AVG(${AMT}) AS INT) avg, MIN(${AMT}) min, MAX(${AMT}) max,
-       CAST(AVG(CASE WHEN area>0 THEN ${AMT}*1.0/area END) AS INT) perArea,
-       SUM(${AMT}*1.0) s, SUM(${AMT}*1.0*${AMT}) ss
-     FROM transactions WHERE ${where}`
-  ).bind(...b).first<{
-    n: number; avg: number; min: number; max: number; perArea: number; s: number; ss: number;
-  }>();
-
-  if (!sum || sum.n === 0) {
-    return { summary: null, byAreaBand: [], byPrice: [], byDecade: [], byRegion: [] };
-  }
-  const n = sum.n;
-  const variance = sum.ss / n - (sum.s / n) ** 2;
-  const stdev = Math.round(Math.sqrt(Math.max(0, variance)));
-
-  // 분위수: 금액 컬럼만 정렬해 1회 조회 후 인덱스로 계산 (OFFSET 4회 풀스캔 회피)
-  const sorted = (
-    (await env.DB.prepare(
-      `SELECT ${AMT} v FROM transactions WHERE ${where} ORDER BY ${AMT}`
-    ).bind(...b).all()).results as { v: number }[]
-  ).map((r) => r.v);
-  const at = (p: number) => sorted[Math.round(p * (n - 1))] ?? 0;
-  const median = at(0.5), p25 = at(0.25), p75 = at(0.75), p90 = at(0.9);
-
-  const summary = {
-    count: n, avg: sum.avg, median, p25, p75, p90,
-    max: sum.max, min: sum.min, stdev, perArea: sum.perArea ?? 0,
-  };
-
   // 면적대별 / 가격대 / 건축연대 / 지역별 — 4쿼리를 batch로 한 번에 실행
   const areaSql = `SELECT
     CASE WHEN area<60 THEN '소형 (~60㎡)' WHEN area<85 THEN '중형 (60~85㎡)'
@@ -601,13 +590,34 @@ export async function computeStatsSql(
     FROM transactions WHERE ${where} AND build_year>0 GROUP BY decade ORDER BY decade`;
   const regSql = `SELECT sgg_cd sggCd, COUNT(*) count, CAST(AVG(${AMT}) AS INT) avg
     FROM transactions WHERE ${where} GROUP BY sgg_cd ORDER BY avg DESC`;
+  const sumSql = `SELECT COUNT(*) n, CAST(AVG(${AMT}) AS INT) avg, MIN(${AMT}) min, MAX(${AMT}) max,
+       CAST(AVG(CASE WHEN area>0 THEN ${AMT}*1.0/area END) AS INT) perArea,
+       SUM(${AMT}*1.0) s, SUM(${AMT}*1.0*${AMT}) ss
+     FROM transactions WHERE ${where}`;
+  const sortedSql = `SELECT ${AMT} v FROM transactions WHERE ${where} ORDER BY ${AMT}`;
 
-  const [areaRes, priceRes, decRes, regRes] = await env.DB.batch([
+  // 6쿼리 전부 단일 batch → 교차리전 왕복 1회 (기존 3회에서 단축)
+  const [sumRes, sortedRes, areaRes, priceRes, decRes, regRes] = await env.DB.batch([
+    env.DB.prepare(sumSql).bind(...b),
+    env.DB.prepare(sortedSql).bind(...b),
     env.DB.prepare(areaSql).bind(...b),
     env.DB.prepare(priceSql).bind(...b),
     env.DB.prepare(decSql).bind(...b),
     env.DB.prepare(regSql).bind(...b),
   ]);
+
+  const sum = (sumRes.results as { n: number; avg: number; min: number; max: number; perArea: number; s: number; ss: number }[])[0];
+  if (!sum || sum.n === 0) {
+    return { summary: null, byAreaBand: [], byPrice: [], byDecade: [], byRegion: [] };
+  }
+  const n = sum.n;
+  const stdev = Math.round(Math.sqrt(Math.max(0, sum.ss / n - (sum.s / n) ** 2)));
+  const sorted = (sortedRes.results as { v: number }[]).map((r) => r.v);
+  const at = (p: number) => sorted[Math.round(p * (n - 1))] ?? 0;
+  const summary = {
+    count: n, avg: sum.avg, median: at(0.5), p25: at(0.25), p75: at(0.75), p90: at(0.9),
+    max: sum.max, min: sum.min, stdev, perArea: sum.perArea ?? 0,
+  };
 
   const bandOrder = ["소형 (~60㎡)", "중형 (60~85㎡)", "중대형 (85~135㎡)", "대형 (135㎡~)"];
   const areaRows = areaRes.results as { band: string; count: number; avg: number }[];

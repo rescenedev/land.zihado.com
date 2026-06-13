@@ -35,6 +35,9 @@ export async function fetchParcel(
     `&format=json&crs=EPSG:4326&geometry=true&attribute=true&size=1` +
     `&geomFilter=POINT(${lng}%20${lat})`;
   try {
+    // 참고: VWorld 는 Cloudflare/데이터센터 IP 의 서버요청을 520 으로 차단한다.
+    // 따라서 실제 폴리곤은 프론트(브라우저, 한국 IP)에서 JSONP 로 호출한다(src/lib/vworld-client.ts).
+    // 이 서버 경로는 한국 IP 서버에서 호출될 때를 위한 폴백으로 남겨둔다.
     const res = await fetch(url);
     if (!res.ok) return null;
     const data = (await res.json()) as any;

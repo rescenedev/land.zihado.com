@@ -52,6 +52,7 @@ export default function Home() {
   const [nav, setNav] = useState("dashboard");
   const [data, setData] = useState<OverviewResponse | null>(null);
   const [allTotals, setAllTotals] = useState<OverviewResponse["totals"] | null>(null);
+  const [prevData, setPrevData] = useState<OverviewResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [selectedSido, setSelectedSido] = useState<string | null>(null);
@@ -110,6 +111,16 @@ export default function Home() {
       .catch(() => {});
     return () => { alive = false; };
   }, [scope, yyyymm, dataset, data]);
+
+  // 전월 데이터 백그라운드 fetch → KPI '전월 대비' 배지용 (현재 scope 동일)
+  useEffect(() => {
+    let alive = true;
+    setPrevData(null);
+    fetchOverview(shiftMonth(yyyymm, -1), scope, dataset)
+      .then((r) => alive && setPrevData(r))
+      .catch(() => {});
+    return () => { alive = false; };
+  }, [yyyymm, scope, dataset]);
 
   // scope/시도/월 변경 시 드릴다운·단지레이어 초기화 (selectedSido 는 칩이 제어)
   useEffect(() => {
@@ -220,6 +231,17 @@ export default function Home() {
     const max = loaded.reduce((m, c) => Math.max(m, c.max), 0);
     return { regions: sortedCards.length, loaded: loaded.length, count: totalCount, avg, max };
   }, [data, selectedSido, sortedCards]);
+
+  // 전월 동일 뷰 집계 (KPI 전월 대비 배지용)
+  const prevTotals = useMemo(() => {
+    if (!prevData) return null;
+    if (!selectedSido) return prevData.totals;
+    const rs = prevData.regions.filter((r) => r.sido === selectedSido && r.count > 0);
+    const count = rs.reduce((s, r) => s + r.count, 0);
+    const avg = count > 0 ? Math.round(rs.reduce((s, r) => s + r.avg * r.count, 0) / count) : 0;
+    const max = rs.reduce((m, r) => Math.max(m, r.max), 0);
+    return { regions: rs.length, loaded: rs.length, count, avg, max };
+  }, [prevData, selectedSido]);
 
   // 비교 기준 (전국 totals): 서울·시도 뷰에서만 의미 있음
   const compBaseline = useMemo(() => {
@@ -419,48 +441,64 @@ export default function Home() {
           <Kpi
             label="총 거래"
             value={visibleTotals ? `${visibleTotals.count.toLocaleString()}건` : "-"}
-            sub={(() => {
-              if (!compBaseline || !visibleTotals || compBaseline.count === 0) return undefined;
-              const pct = Math.round((visibleTotals.count / compBaseline.count) * 100);
-              return (
-                <span>
-                  전국 {compBaseline.count.toLocaleString()}건 중{" "}
-                  <span className="font-semibold text-slate-300">{pct}%</span>
-                </span>
-              );
-            })()}
+            sub={
+              <>
+                {compBaseline && visibleTotals && compBaseline.count > 0 && (
+                  <div>
+                    전국 {compBaseline.count.toLocaleString()}건 중{" "}
+                    <span className="font-semibold text-slate-300">
+                      {Math.round((visibleTotals.count / compBaseline.count) * 100)}%
+                    </span>
+                  </div>
+                )}
+                <div className="mt-0.5">
+                  <MoMChip prev={prevTotals?.count} cur={visibleTotals?.count} />
+                </div>
+              </>
+            }
           />
           <Kpi
             label="84㎡ 평균가"
             value={visibleTotals ? formatEok(visibleTotals.avg) : "-"}
             accent
-            sub={(() => {
-              if (!compBaseline || !visibleTotals || compBaseline.avg === 0) return undefined;
-              const pct = Math.round(((visibleTotals.avg - compBaseline.avg) / compBaseline.avg) * 100);
-              const up = pct >= 0;
-              return (
-                <span>
-                  전국 평균 {formatEok(compBaseline.avg)}{" "}
-                  <span className={`font-semibold ${up ? "text-rose-400" : "text-blue-400"}`}>
-                    {up ? "▲" : "▼"}{up ? "+" : ""}{pct}%
-                  </span>
-                </span>
-              );
-            })()}
+            sub={
+              <>
+                {compBaseline && visibleTotals && compBaseline.avg > 0 && (() => {
+                  const pct = Math.round(((visibleTotals.avg - compBaseline.avg) / compBaseline.avg) * 100);
+                  const up = pct >= 0;
+                  return (
+                    <div>
+                      전국 평균 {formatEok(compBaseline.avg)}{" "}
+                      <span className={`font-semibold ${up ? "text-rose-400" : "text-blue-400"}`}>
+                        {up ? "▲" : "▼"}{up ? "+" : ""}{pct}%
+                      </span>
+                    </div>
+                  );
+                })()}
+                <div className="mt-0.5">
+                  <MoMChip prev={prevTotals?.avg} cur={visibleTotals?.avg} />
+                </div>
+              </>
+            }
           />
           <Kpi
             label="최고 거래가"
             value={visibleTotals ? formatEok(visibleTotals.max) : "-"}
-            sub={(() => {
-              if (!compBaseline || !visibleTotals || compBaseline.max === 0) return undefined;
-              const pct = Math.round((visibleTotals.max / compBaseline.max) * 100);
-              return (
-                <span>
-                  전국 최고 {formatEok(compBaseline.max)}{" "}
-                  <span className="font-semibold text-slate-300">{pct}%</span>
-                </span>
-              );
-            })()}
+            sub={
+              <>
+                {compBaseline && visibleTotals && compBaseline.max > 0 && (
+                  <div>
+                    전국 최고 {formatEok(compBaseline.max)}{" "}
+                    <span className="font-semibold text-slate-300">
+                      {Math.round((visibleTotals.max / compBaseline.max) * 100)}%
+                    </span>
+                  </div>
+                )}
+                <div className="mt-0.5">
+                  <MoMChip prev={prevTotals?.max} cur={visibleTotals?.max} />
+                </div>
+              </>
+            }
           />
           <Kpi
             label="수집 지역"
@@ -692,6 +730,18 @@ function Kpi({
       </div>
       {sub && <div className="mt-1 text-[11px] text-slate-500">{sub}</div>}
     </div>
+  );
+}
+
+// 전월 대비 증감 칩
+function MoMChip({ prev, cur }: { prev?: number; cur?: number }) {
+  if (!prev || cur === undefined || cur === null) return null;
+  const pct = Math.round(((cur - prev) / prev) * 100);
+  const up = pct >= 0;
+  return (
+    <span className={up ? "text-rose-400" : "text-blue-400"}>
+      전월 대비 {up ? "▲" : "▼"} {up ? "+" : ""}{pct}%
+    </span>
   );
 }
 
