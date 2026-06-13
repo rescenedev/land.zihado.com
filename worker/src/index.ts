@@ -685,11 +685,12 @@ app.post("/api/admin/backfill", async (c) => {
 
 // 캐시 워밍 즉시 트리거 (cron 안 기다리고 Vercel+CF 전부 데움)
 app.post("/api/admin/warm", async (c) => {
-  const which = c.req.query("which"); // core | recent-sido | regions | (기본 전부)
+  const which = c.req.query("which"); // core | recent-sido | regions | regions-past | (기본 전부)
   c.executionCtx.waitUntil(
     which === "core" ? warmCore()
       : which === "recent-sido" ? warmRecentSido()
       : which === "regions" ? warmRegions()
+      : which === "regions-past" ? warmRegionsPast()
       : warmCaches()
   );
   return c.json({ ok: true, started: true, which: which ?? "all" });
@@ -717,14 +718,16 @@ async function warmPaths(paths: string[]): Promise<void> {
 // cron A (코어): 대시보드 + 통계 + 오늘의실거래(전국/서울 30일). 전 데이터셋. (~150 요청)
 // ⚠️ URL 파라미터 순서·값을 프론트(src/lib/api.ts)와 정확히 일치시켜야 같은 캐시 키.
 async function warmCore(): Promise<void> {
-  const curM = curYmd();
+  const months = recentMonths(3); // 당월 + 과거 2개월 (기준월 네비)
   const dsets = enabledDatasets().map((d) => d.key); // 매매/전월세/분양권
   const paths: string[] = [];
   for (const ds of dsets) {
-    paths.push(`/api/overview?dataset=${ds}&scope=all&yyyymm=${curM}`);
-    paths.push(`/api/overview?dataset=${ds}&scope=seoul&yyyymm=${curM}`);
-    for (const s of WARM_SIDOS)
-      paths.push(`/api/statistics?dataset=${ds}&scope=${encodeURIComponent(s)}&yyyymm=${curM}`);
+    for (const ym of months) {
+      paths.push(`/api/overview?dataset=${ds}&scope=all&yyyymm=${ym}`);
+      paths.push(`/api/overview?dataset=${ds}&scope=seoul&yyyymm=${ym}`);
+      for (const s of WARM_SIDOS)
+        paths.push(`/api/statistics?dataset=${ds}&scope=${encodeURIComponent(s)}&yyyymm=${ym}`);
+    }
     // 오늘의실거래 전국/서울 30일 (시도탭은 cron C 에서)
     for (let i = 0; i < 30; i++) {
       const dt = shiftDays(i);
@@ -756,7 +759,7 @@ async function warmRecentSido(): Promise<void> {
   await warmPaths(paths);
 }
 
-// cron B (지역): 시군구 상세(거래목록 + 단지지도 + 12개월 추이) 당월. 250개 × 3 = ~750 요청.
+// cron B (지역-당월): 거래목록 + 단지지도 + 12개월 추이 + 단지목록. 128 × 4 = ~512 요청.
 // 추이(range)는 RegionDetail 이 부르는 고정 범위(최근 12개월)와 정확히 일치시킴.
 async function warmRegions(): Promise<void> {
   const curM = curYmd();
@@ -771,11 +774,25 @@ async function warmRegions(): Promise<void> {
   await warmPaths(paths);
 }
 
+// cron D (지역-과거월): 거래목록 + 단지지도 × 과거 2개월(기준월 네비). 128 × 2 × 2 = ~512 요청.
+async function warmRegionsPast(): Promise<void> {
+  const past = recentMonths(3).slice(0, 2); // 당월 제외 과거 2개월
+  const paths: string[] = [];
+  for (const ym of past) {
+    for (const cd of SGG_CODES) {
+      paths.push(`/api/transactions?dataset=aptTrade&region=${cd}&yyyymm=${ym}`);
+      paths.push(`/api/aptmap?dataset=aptTrade&region=${cd}&yyyymm=${ym}&limit=40`);
+    }
+  }
+  await warmPaths(paths);
+}
+
 // 수동 트리거(admin/warm)·초기화용: 전부 순차 실행.
 async function warmCaches(): Promise<void> {
   await warmCore();
   await warmRecentSido();
   await warmRegions();
+  await warmRegionsPast();
 }
 
 function buildBackfillJobs(months: number): BackfillJob[] {
@@ -824,7 +841,9 @@ export default {
   //   "15,45" → 지역 워밍(시군구 거래목록/단지지도)
   async scheduled(event: ScheduledController, env: Env, ctx: ExecutionContext) {
     if (event.cron === "15,45 * * * *") {
-      ctx.waitUntil(warmRegions());          // cron B: 시군구 상세
+      ctx.waitUntil(warmRegions());          // cron B: 시군구 상세 당월
+    } else if (event.cron === "22,52 * * * *") {
+      ctx.waitUntil(warmRegionsPast());      // cron D: 시군구 상세 과거 2개월
     } else if (event.cron === "7,37 * * * *") {
       ctx.waitUntil(warmRecentSido());       // cron C: 오늘의실거래 시도탭
     } else {

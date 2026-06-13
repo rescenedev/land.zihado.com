@@ -1,6 +1,11 @@
 export const API_BASE =
   process.env.NEXT_PUBLIC_API_BASE ?? "http://localhost:8787";
 
+// 캐시 가능한 공유 GET(overview/recent/통계 등)은 Vercel 서울 엣지 프록시(상대경로)로
+// → HIT 시 ~12-18ms(서울). 동적/단건(단지상세·좌표·주변·검색)은 워커 직접(도쿄, MISS 1s 회피).
+// NEXT_PUBLIC_USE_PROXY=1 (프로덕션)일 때만 프록시 사용. 로컬은 워커 직접.
+const CACHED_BASE = process.env.NEXT_PUBLIC_USE_PROXY === "1" ? "" : API_BASE;
+
 // 클라이언트 메모리 캐시 + 동일요청 합치기 → 눌렀던 페이지 재방문 즉시(네트워크 0)
 type CacheEntry = { t: number; ok: boolean; data: unknown };
 const _mem = new Map<string, CacheEntry>();
@@ -111,7 +116,7 @@ export async function fetchOverview(
   dataset = "aptTrade"
 ): Promise<OverviewResponse> {
   const e = await cachedGet(
-    `${API_BASE}/api/overview?dataset=${dataset}&scope=${scope}&yyyymm=${yyyymm}`,
+    `${CACHED_BASE}/api/overview?dataset=${dataset}&scope=${scope}&yyyymm=${yyyymm}`,
     30 * 1000 // 수집 진행 반영 위해 짧게
   );
   if (!e.ok) throw new Error((e.data as { error?: string }).error || "overview 실패");
@@ -124,7 +129,7 @@ export async function fetchTransactions(
   dataset = "aptTrade"
 ): Promise<{ items: Transaction[]; source: string; filling: boolean }> {
   const e = await cachedGet(
-    `${API_BASE}/api/transactions?dataset=${dataset}&region=${region}&yyyymm=${yyyymm}`,
+    `${CACHED_BASE}/api/transactions?dataset=${dataset}&region=${region}&yyyymm=${yyyymm}`,
     5 * 60 * 1000,
     // 수집 중 응답은 캐시하지 않음 (폴링이 빈 결과를 재사용하지 않도록)
     (d, ok) => ok && !(d as { filling?: boolean }).filling
@@ -149,7 +154,7 @@ export async function fetchRecent(
 ): Promise<{ latest: string; deals: Transaction[] }> {
   const dateParam = date ? `&date=${date}` : "";
   const e = await cachedGet(
-    `${API_BASE}/api/recent?dataset=${dataset}&scope=${scope}&yyyymm=${yyyymm}&limit=${limit}${dateParam}`,
+    `${CACHED_BASE}/api/recent?dataset=${dataset}&scope=${scope}&yyyymm=${yyyymm}&limit=${limit}${dateParam}`,
     60 * 1000
   );
   const d = e.data as { latest?: string; deals?: Transaction[] };
@@ -173,7 +178,7 @@ export async function fetchAptMap(
   dataset = "aptTrade"
 ): Promise<AptMapItem[]> {
   const e = await cachedGet(
-    `${API_BASE}/api/aptmap?dataset=${dataset}&region=${region}&yyyymm=${yyyymm}&limit=500`
+    `${CACHED_BASE}/api/aptmap?dataset=${dataset}&region=${region}&yyyymm=${yyyymm}&limit=500`
   );
   return e.ok ? ((e.data as { items?: AptMapItem[] }).items ?? []) : [];
 }
@@ -264,7 +269,7 @@ export async function fetchTrend(
   dataset = "aptTrade"
 ): Promise<TrendPoint[]> {
   const e = await cachedGet(
-    `${API_BASE}/api/transactions/range?dataset=${dataset}&region=${region}&from=${from}&to=${to}`
+    `${CACHED_BASE}/api/transactions/range?dataset=${dataset}&region=${region}&from=${from}&to=${to}`
   );
   const data = e.data as { error?: string; trend?: TrendPoint[] };
   if (!e.ok) throw new Error(data.error || "추이 실패");
@@ -299,7 +304,7 @@ export async function fetchStatistics(
   dataset = "aptTrade"
 ): Promise<Statistics> {
   const e = await cachedGet(
-    `${API_BASE}/api/statistics?dataset=${dataset}&scope=${scope}&yyyymm=${yyyymm}`
+    `${CACHED_BASE}/api/statistics?dataset=${dataset}&scope=${scope}&yyyymm=${yyyymm}`
   );
   if (!e.ok) throw new Error((e.data as { error?: string }).error || "통계 실패");
   return e.data as Statistics;
