@@ -14,10 +14,16 @@ CDN HIT(≤50ms)로 둘 수 없다. 따라서 durable 목표는 "전부 ≤50ms"
 | 티어 | 경로 | 지연 | 대상 |
 |---|---|---|---|
 | 핫 | Vercel CDN HIT | ~10-20ms | core·오늘의실거래 최근·인기 지역 (LRU 가 유지) |
-| long-tail | Vercel MISS → 워커 KV HIT | ~60-120ms | 나머지 (KV 는 무한 용량·TTL 25h·cron 매일 갱신) |
-| 🔴 콜드 | Vercel MISS → 워커 KV miss → D1 재집계 | 300ms~2s | **워밍 갭. 이게 0 이어야 함.** |
+| long-tail (colo 따뜻) | Vercel MISS → 워커 KV HIT(해당 colo 캐시됨) | ~60-120ms | 그 colo 에서 최근 읽힌 키 |
+| long-tail (colo cold-read) | Vercel MISS → 워커 KV **colo별 첫 읽기** | **~300ms** | 그 colo 가 처음 읽는 키 (CF KV 구조적 바닥) |
+| 🔴 진짜 콜드 | Vercel MISS → KV 도 없음 → D1 재집계 | 500ms~2s | **워밍 갭. 이게 0 이어야 함.** |
 
-→ 워밍은 워커 KV(무한)를 항상 채우는 게 1순위. CDN HIT 는 LRU 가 인기 URL 을 알아서 유지. 모니터는 **D1 콜드(MISS>150ms)** 를 갭으로 본다.
+→ **CF KV 는 colo별 cold-read 페널티(~300ms)가 있다.** 특정 키를 처음 읽는 colo 는 중앙저장소 fetch
+로 ~300ms, 그 후 그 colo edge 에 캐시돼 ~60ms. anycast 라 colo 제어 불가 → deep long-tail
+(희귀 sido×과거날짜, 희귀 region aptmap)의 colo별 첫조회 ~300ms 는 **구조적 바닥**(워밍으로 모든
+colo 를 데울 수 없음). 이건 버그 아님. 재워밍해도 한 colo 만 데워져 무의미.
+→ 핫셋(자주 읽힘)은 모든 주요 colo 에 상주 → 빠름. 모니터의 long-tail 150~400ms MISS 는 colo
+cold-read(정상). **진짜 갭은 500ms+ 지속 또는 핫셋 콜드.** 워밍 1순위는 핫셋 KV 바닥 + CDN.
 
 ## 측정 규칙
 1. **실제 호출만 측정.** 모니터(`scripts/monitor.py`)의 엔드포인트는 이 표에서 도출. 손으로 짓지 않는다.

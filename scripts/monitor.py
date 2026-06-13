@@ -69,18 +69,24 @@ ENDPOINTS = [
 # 임계값 근거(실측): Vercel CDN HIT ~15ms / 워커 KV HIT(Vercel MISS) ~60-120ms / D1 콜드 >300ms.
 # Vercel CDN 은 용량 한계로 long-tail 을 LRU evict → 전 URL ≤50ms 는 물리적 불가.
 # 목표: D1 콜드(워커 KV 도 비어 재집계) = 0. 그게 워밍 갭의 진짜 신호.
-COLD_MS = 150        # > COLD_MS & MISS = D1 콜드(워밍 갭). 50~150 MISS = 워커 KV(정상 long-tail).
+# 임계값을 엔드포인트 유형별로: 코어는 엄격(CDN 상주 기대), long-tail 은 CF KV colo cold-read(~300ms) 허용.
+CORE_LABELS = {"overview", "statistics"}
+COLD_CORE = 150      # 코어 MISS>150 = 진짜 갭(핫셋이 콜드면 안 됨)
+COLD_TAIL = 500      # long-tail MISS>500 = 진짜 갭. 150~500 = colo cold-read(정상, CF 구조)
+def cold_thr(label):
+    return COLD_CORE if label in CORE_LABELS else COLD_TAIL
 def run(n=8):
     ctx = ssl.create_default_context()
     conn = http.client.HTTPSConnection(HOST, context=ctx, timeout=60)
     hdr = {"User-Agent": "Mozilla/5.0", "Connection": "keep-alive"}
     ts = datetime.datetime.now().strftime("%H:%M:%S")
-    cold = []   # MISS & >COLD_MS = D1 콜드 갭
+    cold = []   # 진짜 갭(유형별 임계 초과 MISS)
     total = 0
-    print(f"=== {ts} (엔드포인트 {len(ENDPOINTS)} × ~{n} 샘플, 첫조회 측정, 콜드기준 {COLD_MS}ms) ===")
+    print(f"=== {ts} (엔드포인트 {len(ENDPOINTS)} × ~{n} 샘플, 첫조회; 코어>{COLD_CORE} / long-tail>{COLD_TAIL} = 갭) ===")
     for label, gen in ENDPOINTS:
         worst = None
         ncold = 0
+        thr = cold_thr(label)
         for _ in range(n):
             path = gen()
             if not path:
@@ -98,13 +104,13 @@ def run(n=8):
                 continue
             if worst is None or ms > worst[0]:
                 worst = (ms, vc)
-            if ms > COLD_MS and vc == "MISS":      # D1 콜드(워커 KV 도 비어 재집계) = 진짜 갭
+            if ms > thr and vc == "MISS":      # 유형별 임계 초과 = 진짜 갭
                 ncold += 1
                 cold.append((label, round(ms), path))
         if worst:
-            tag = f"  🔴{ncold} D1콜드>{COLD_MS}" if ncold else ""
+            tag = f"  🔴{ncold} 갭>{thr}" if ncold else ""
             print(f"  {label:16} worst {worst[0]:6.0f}ms ({worst[1]}){tag}")
-    print(f"  --> D1 콜드 갭(MISS>{COLD_MS}ms) {len(cold)}건 / {total} 측정  (50~150 MISS=워커KV, 정상)")
+    print(f"  --> 진짜 갭 {len(cold)}건 / {total} 측정  (long-tail 150~500 MISS=CF KV colo cold-read, 정상)")
     for c in cold[:12]:
         print(f"      {c}")
     return cold
