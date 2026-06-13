@@ -36,21 +36,26 @@ app.use("*", cors());
 // 엣지 캐시(Cache API): colo-로컬 히트는 KV 왕복·연산을 건너뛰고 ~1ms에 응답.
 // GET 200 응답을 URL 키로 colo 캐시에 저장. no-store 응답(수집 중 등)은 제외.
 // cors 다음에 등록 → HIT/MISS 모두 cors가 바깥에서 CORS 헤더를 매번 부여.
+// 실거래가는 하루 1회 갱신 → 신선 윈도우(s-maxage)를 12시간으로. 갱신은 일일 cron 워밍이
+// CDN을 새로 채워 반영. SWR 7일이라 만료돼도 stale 즉시 서빙 + 백그라운드 갱신.
+// 위치 기반(coord/nearby/parcel)은 불변 → 24시간.
+const H12 = 60 * 60 * 12;
+const D1 = 60 * 60 * 24;
 const EDGE_TTL: Array<[RegExp, number]> = [
-  [/\/api\/datasets/, 3600],
-  [/\/api\/overview/, 300],
-  [/\/api\/recent/, 300],
-  [/\/api\/statistics/, 300],
-  [/\/api\/stats(\?|$)/, 300],
-  [/\/api\/transactions\/range/, 600],
-  [/\/api\/transactions(\?|$)/, 300],
-  [/\/api\/aptmap/, 300],
-  [/\/api\/complexes/, 600],
-  [/\/api\/complex(\?|$)/, 600],
-  [/\/api\/aptsearch/, 300],
-  [/\/api\/nearby/, 86400],
-  [/\/api\/parcel/, 86400],
-  [/\/api\/coord/, 86400],
+  [/\/api\/datasets/, H12],
+  [/\/api\/overview/, H12],
+  [/\/api\/recent/, H12],
+  [/\/api\/statistics/, H12],
+  [/\/api\/stats(\?|$)/, H12],
+  [/\/api\/transactions\/range/, H12],
+  [/\/api\/transactions(\?|$)/, H12],
+  [/\/api\/aptmap/, H12],
+  [/\/api\/complexes/, H12],
+  [/\/api\/complex(\?|$)/, H12],
+  [/\/api\/aptsearch/, H12],
+  [/\/api\/nearby/, D1],
+  [/\/api\/parcel/, D1],
+  [/\/api\/coord/, D1],
 ];
 function edgeTtl(url: string): number | null {
   const path = url.slice(url.indexOf("/api/"));
@@ -101,7 +106,7 @@ function shiftDays(daysAgo: number): string {
 
 function respTtl(yyyymm: string, now = new Date()): number {
   const cur = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, "0")}`;
-  return yyyymm >= cur ? 60 * 60 : 60 * 60 * 24 * 7; // 당월 1시간 / 과거 7일
+  return yyyymm >= cur ? 60 * 60 * 12 : 60 * 60 * 24 * 7; // 당월 12시간(일1회 갱신·워밍 유지) / 과거 7일
 }
 
 // SubscriptionError → 403, 그 외 → 500 으로 일관 처리
@@ -880,15 +885,14 @@ export default {
   //   38 0 → 오늘의실거래 시도탭 + 과거월 지역
   // 단지 상세 모달은 on-demand(~150ms) + warmAfterIngest(신규 단지)로 충분 → bulk cron 워밍 제거.
   async scheduled(event: ScheduledController, env: Env, ctx: ExecutionContext) {
-    if (event.cron === "34 0 * * *") {
-      ctx.waitUntil(warmRegions());
-    } else if (event.cron === "38 0 * * *") {
-      ctx.waitUntil((async () => { await warmRecentSido(); await warmRegionsPast(); })());
-    } else if (event.cron === "42 0 * * *") {
+    // ⚠️ 지역/recent시도/과거월을 Vercel CDN 에 워밍하면 CDN(~2천 용량)을 thrash 시켜
+    //    핫키(통계·대시보드)까지 evict 됨 → CDN 워밍은 핫 bounded(core) 만.
+    //    지역상세·단지모달 등 long-tail 은 워커 KV(아래 큐) + 프론트 점진렌더로 처리.
+    if (event.cron === "42 0 * * *") {
       ctx.waitUntil(enqueueComplexWarm(env)); // 단지 상세 모달 KV 워밍(당월 단지 전부, 큐 분산)
     } else {
       ctx.waitUntil(enqueue(env, buildBackfillJobs(2)));
-      ctx.waitUntil(warmCore());
+      ctx.waitUntil(warmCore());              // 핫 bounded 만 CDN 워밍
     }
   },
 
