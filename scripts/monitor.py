@@ -66,17 +66,21 @@ ENDPOINTS = [
     ("aptsearch",    gen_aptsearch),
 ]
 
+# 임계값 근거(실측): Vercel CDN HIT ~15ms / 워커 KV HIT(Vercel MISS) ~60-120ms / D1 콜드 >300ms.
+# Vercel CDN 은 용량 한계로 long-tail 을 LRU evict → 전 URL ≤50ms 는 물리적 불가.
+# 목표: D1 콜드(워커 KV 도 비어 재집계) = 0. 그게 워밍 갭의 진짜 신호.
+COLD_MS = 150        # > COLD_MS & MISS = D1 콜드(워밍 갭). 50~150 MISS = 워커 KV(정상 long-tail).
 def run(n=8):
     ctx = ssl.create_default_context()
     conn = http.client.HTTPSConnection(HOST, context=ctx, timeout=60)
     hdr = {"User-Agent": "Mozilla/5.0", "Connection": "keep-alive"}
     ts = datetime.datetime.now().strftime("%H:%M:%S")
-    cold = []   # MISS & >50ms = 진짜 갭
+    cold = []   # MISS & >COLD_MS = D1 콜드 갭
     total = 0
-    print(f"=== {ts} (엔드포인트 {len(ENDPOINTS)} × ~{n} 샘플, 첫조회 측정) ===")
+    print(f"=== {ts} (엔드포인트 {len(ENDPOINTS)} × ~{n} 샘플, 첫조회 측정, 콜드기준 {COLD_MS}ms) ===")
     for label, gen in ENDPOINTS:
         worst = None
-        miss_slow = 0
+        ncold = 0
         for _ in range(n):
             path = gen()
             if not path:
@@ -94,13 +98,13 @@ def run(n=8):
                 continue
             if worst is None or ms > worst[0]:
                 worst = (ms, vc)
-            if ms > 50 and vc == "MISS":      # 진짜 콜드 갭(워밍 놓침)
-                miss_slow += 1
+            if ms > COLD_MS and vc == "MISS":      # D1 콜드(워커 KV 도 비어 재집계) = 진짜 갭
+                ncold += 1
                 cold.append((label, round(ms), path))
         if worst:
-            tag = f"  ⚠️{miss_slow} MISS>50" if miss_slow else ""
+            tag = f"  🔴{ncold} D1콜드>{COLD_MS}" if ncold else ""
             print(f"  {label:16} worst {worst[0]:6.0f}ms ({worst[1]}){tag}")
-    print(f"  --> 콜드 갭(MISS>50ms) {len(cold)}건 / {total} 측정")
+    print(f"  --> D1 콜드 갭(MISS>{COLD_MS}ms) {len(cold)}건 / {total} 측정  (50~150 MISS=워커KV, 정상)")
     for c in cold[:12]:
         print(f"      {c}")
     return cold
