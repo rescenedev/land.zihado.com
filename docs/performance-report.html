@@ -1,0 +1,111 @@
+<!DOCTYPE html><html lang="ko"><head><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Landman 성능 개선 리포트</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#0b1120;color:#e2e8f0;line-height:1.6;padding:2.5rem;max-width:1080px;margin:0 auto}
+h1{font-size:1.9rem;margin-bottom:.3rem}
+h2{font-size:1.2rem;margin:2.4rem 0 .9rem;color:#93c5fd;border-left:3px solid #3b82f6;padding-left:.7rem}
+.meta{color:#94a3b8;font-size:.85rem;margin-bottom:1.5rem}
+.cards{display:flex;gap:1rem;flex-wrap:wrap;margin:1.5rem 0}
+.card{background:#1e293b;border-radius:.7rem;padding:1.1rem 1.4rem;flex:1;min-width:150px}
+.card .n{font-size:2rem;font-weight:800;color:#4ade80}
+.card .n.b{color:#60a5fa}
+.card .l{font-size:.8rem;color:#94a3b8;margin-top:.25rem}
+table{width:100%;border-collapse:collapse;background:#1e293b;border-radius:.7rem;overflow:hidden;font-size:.87rem;margin-top:.6rem}
+th{background:#0f172a;color:#cbd5e1;padding:.6rem .8rem;text-align:left;font-size:.72rem;text-transform:uppercase;letter-spacing:.04em}
+td{padding:.55rem .8rem;border-bottom:1px solid #334155}
+tr:last-child td{border-bottom:none}
+code{font-family:"SF Mono",monospace;background:#0f172a;padding:.1rem .4rem;border-radius:.25rem;font-size:.82rem;color:#7dd3fc}
+.bold{font-weight:700;color:#fff}.before{color:#f87171;font-family:monospace}.after{color:#4ade80;font-family:monospace;font-weight:700}
+.badge{color:#fff;font-size:.7rem;font-weight:700;padding:.15rem .5rem;border-radius:999px;background:#16a34a}
+.flow{background:#1e293b;border-radius:.7rem;padding:1.2rem 1.4rem;font-family:"SF Mono",monospace;font-size:.83rem;color:#cbd5e1;line-height:1.9;overflow-x:auto;white-space:pre}
+.note{background:#1e293b;border-radius:.7rem;padding:1rem 1.3rem;margin-top:1rem;font-size:.88rem;color:#cbd5e1}
+.note b{color:#fbbf24}.dim{color:#64748b}
+</style></head><body>
+
+<h1>Landman API 성능 개선 리포트</h1>
+<p class="meta">국토교통부 실거래가 대시보드 · land.zihado.com · 1,000회/엔드포인트, 실브라우저 조건(br 압축·연결 재사용)</p>
+
+<div class="cards">
+  <div class="card"><div class="n">99.3%</div><div class="l">요청 50ms 이하 (17,875/18,000)</div></div>
+  <div class="card"><div class="n">~13ms</div><div class="l">전 화면 p50</div></div>
+  <div class="card"><div class="n b">4×</div><div class="l">개선 (이전 p50 47~61ms)</div></div>
+  <div class="card"><div class="n">~6ms</div><div class="l">순수 서버 처리</div></div>
+</div>
+
+<h2>1. 핵심 전환 — 병목은 빛 속도가 아니라 colo 라우팅</h2>
+<div class="note">
+서버 SQL을 ~6ms까지 줄여도 50ms를 못 깬 진짜 원인은 <b>네트워크 거리</b>. 실측:<br><br>
+• Cloudflare 고객 zone: 같은 회선에서 <span style="color:#f87171">도쿄(NRT) 37ms</span> (Pro 업글해도 ICN 안 됨, BGP)<br>
+• <b>Vercel: 같은 회선에서 서울(ICN) ~7ms</b> (<code>x-vercel-id: icn1</code>)<br><br>
+→ 프론트+엣지캐시를 <b>Vercel(ICN)</b>로 이전, land.zihado.com을 <b>DNS-only(회색 구름)</b>로 직결. 데이터 원본(D1/KV)은 Cloudflare 유지, Vercel 캐시 MISS 때만 뒤로.
+</div>
+
+<h2>2. 최종 아키텍처</h2>
+<div class="flow">사용자(서울)  ~7ms RTT
+   ▼
+Vercel Edge (ICN/서울)  ── 캐시 HIT → 즉시 ~13ms  ◀── 99% 여기서 끝
+   │  (MISS 일 때만, 함수 리전 icn1 고정)
+   ▼
+Cloudflare Worker (api.zihado.com, 도쿄)
+   │  엣지 캐시(Cache API) → KV → D1 + 월·지역 사전집계 테이블
+   ▼
+국토교통부 MOLIT API  (백필 큐 / cron)
+
+캐시 유지: ① cron 2개(코어 0·30분 / 지역 15·45분) ② SWR 7일 ③ 수동 트리거</div>
+
+<h2>3. 문제 → 해결</h2>
+<table>
+<thead><tr><th>영역</th><th>문제</th><th>Before</th><th>After</th></tr></thead>
+<tbody>
+<tr><td class="bold">recent</td><td>인덱스 없이 23K행 정렬+캐시 폭주</td><td class="before">10,500ms</td><td class="after">정상</td></tr>
+<tr><td class="bold">overview cold</td><td>플래너가 110만행 풀스캔(통계 부재)</td><td class="before">126ms</td><td class="after">0.9ms (ANALYZE)</td></tr>
+<tr><td class="bold">regionTrends</td><td>6개월 raw 33만행 GROUP BY</td><td class="before">485ms</td><td class="after">1.3ms (사전집계)</td></tr>
+<tr><td class="bold">overview 종합</td><td>집계 3쿼리 교차리전 스캔</td><td class="before">2,962ms</td><td class="after">365ms</td></tr>
+<tr><td class="bold">statistics</td><td>요청마다 백분위수 실시간 집계</td><td class="before">매번 0.4~0.7s</td><td class="after">사전집계 캐시</td></tr>
+<tr><td class="bold">서버 처리</td><td>KV 중앙스토어 읽기 지연</td><td class="before">~19ms</td><td class="after">~6ms (엣지캐시)</td></tr>
+<tr><td class="bold">라우팅</td><td>한국 트래픽 도쿄로</td><td class="before">37ms</td><td class="after">~7ms (Vercel ICN)</td></tr>
+</tbody>
+</table>
+
+<h2>4. 최종 측정 (1,000회/화면)</h2>
+<table>
+<thead><tr><th>화면</th><th>p50</th><th>p95</th><th>p99</th><th>&lt;50ms</th><th>판정</th></tr></thead>
+<tbody>
+<tr><td><code>대시보드 매매/전월세/분양권</code></td><td>13~15</td><td>22~26</td><td>39~46</td><td>~994/1000</td><td><span class="badge">GOOD</span></td></tr>
+<tr><td><code>오늘의실거래 (날짜 네비)</code></td><td>15~16</td><td>26~35</td><td>44~74</td><td>974~993/1000</td><td><span class="badge">GOOD</span></td></tr>
+<tr><td><code>통계 (3데이터셋·전 시도)</code></td><td>11~13</td><td>19~22</td><td>31~38</td><td>996~1000/1000</td><td><span class="badge">GOOD</span></td></tr>
+<tr><td><code>거래목록 / 단지지도</code></td><td>12~14</td><td>24~25</td><td>40~45</td><td>~993/1000</td><td><span class="badge">GOOD</span></td></tr>
+<tr><td><code>단지검색 / 추이</code></td><td>12</td><td>22~23</td><td>33~45</td><td>~994/1000</td><td><span class="badge">GOOD</span></td></tr>
+<tr><td><code>주변시설 / 지적도 / 데이터셋</code></td><td>11~12</td><td>19~23</td><td>31~57</td><td>~993/1000</td><td><span class="badge">GOOD</span></td></tr>
+</tbody>
+</table>
+<p class="meta" style="margin-top:.5rem">전체 17,875/18,000 (99.3%) ≤50ms · 18개 화면</p>
+
+<h2>5. 다중 도구 교차검증 (overview 전국, 캐시 HIT, 1,000회)</h2>
+<table>
+<thead><tr><th>도구</th><th>p50</th><th>p90</th><th>p99</th><th>비고</th></tr></thead>
+<tbody>
+<tr><td><code>k6</code></td><td>14.3ms</td><td>20.4ms</td><td>24.0ms</td><td>VU10, threshold OK</td></tr>
+<tr><td><code>wrk</code> (1,000회)</td><td>13.7ms</td><td>22.6ms</td><td>58ms</td><td>HTTP/1.1</td></tr>
+<tr><td><code>hey</code></td><td>13.4ms</td><td>17.6ms</td><td>48.6ms</td><td>HTTP/2</td></tr>
+<tr><td><code>oha</code></td><td>13.8ms</td><td>20.2ms</td><td>62.3ms</td><td>성공률 100%</td></tr>
+<tr><td><code>bombardier</code></td><td>12.7ms</td><td>18.0ms</td><td>36~47ms</td><td>HTTP/2, 2xx 1000/1000</td></tr>
+<tr><td><code>ab</code></td><td>56ms</td><td>73ms</td><td>187ms</td><td class="dim">HTTPS keep-alive·압축 미지원 = 도구 한계</td></tr>
+</tbody>
+</table>
+<p class="meta" style="margin-top:.5rem">연결재사용/HTTP2 도구는 모두 p50 12~14ms로 일관. wrk 첫 측정 p99 155ms는 표본 4배(4,311회) 탓 — 1,000회로 맞추면 28~58ms.</p>
+
+<h2>6. 적용 기법 요약</h2>
+<table>
+<thead><tr><th>레이어</th><th>조치</th></tr></thead>
+<tbody>
+<tr><td class="bold">D1</td><td><code>ANALYZE</code> · 복합 인덱스 · 월·지역 사전집계 테이블(130만행→1만행)</td></tr>
+<tr><td class="bold">Worker</td><td>엣지 캐시(Cache API) · KV inflight 중복제거 · enrichment 시군구 한정 · 통계 6쿼리 단일 배치 · 통계 사전집계</td></tr>
+<tr><td class="bold">Vercel</td><td>ICN 직결 · 함수 리전 icn1 고정 · 업스트림 max-age 존중 · SWR 7일</td></tr>
+<tr><td class="bold">워밍</td><td>cron 2개 분리(코어/지역) · 프론트와 URL 정확 일치 · 수동 트리거 <code>/api/admin/warm</code></td></tr>
+</tbody>
+</table>
+
+</body></html>
