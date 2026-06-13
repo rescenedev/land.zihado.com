@@ -685,9 +685,12 @@ app.post("/api/admin/backfill", async (c) => {
 
 // 캐시 워밍 즉시 트리거 (cron 안 기다리고 Vercel+CF 전부 데움)
 app.post("/api/admin/warm", async (c) => {
-  const which = c.req.query("which"); // core | regions | (기본 둘 다)
+  const which = c.req.query("which"); // core | recent-sido | regions | (기본 전부)
   c.executionCtx.waitUntil(
-    which === "core" ? warmCore() : which === "regions" ? warmRegions() : warmCaches()
+    which === "core" ? warmCore()
+      : which === "recent-sido" ? warmRecentSido()
+      : which === "regions" ? warmRegions()
+      : warmCaches()
   );
   return c.json({ ok: true, started: true, which: which ?? "all" });
 });
@@ -711,7 +714,7 @@ async function warmPaths(paths: string[]): Promise<void> {
   }
 }
 
-// cron A (코어): 대시보드 + 통계 + 오늘의실거래. 전 데이터셋. (~390 요청, 한 번에 완료)
+// cron A (코어): 대시보드 + 통계 + 오늘의실거래(전국/서울 30일). 전 데이터셋. (~150 요청)
 // ⚠️ URL 파라미터 순서·값을 프론트(src/lib/api.ts)와 정확히 일치시켜야 같은 캐시 키.
 async function warmCore(): Promise<void> {
   const curM = curYmd();
@@ -722,35 +725,56 @@ async function warmCore(): Promise<void> {
     paths.push(`/api/overview?dataset=${ds}&scope=seoul&yyyymm=${curM}`);
     for (const s of WARM_SIDOS)
       paths.push(`/api/statistics?dataset=${ds}&scope=${encodeURIComponent(s)}&yyyymm=${curM}`);
-  }
-  for (const ds of dsets) {
+    // 오늘의실거래 전국/서울 30일 (시도탭은 cron C 에서)
     for (let i = 0; i < 30; i++) {
       const dt = shiftDays(i);
       if (!dt) continue;
       const ym = dt.slice(0, 6);
       const d = `${dt.slice(0, 4)}-${dt.slice(4, 6)}-${dt.slice(6, 8)}`;
-      const scopes = i < 7 ? WARM_SIDOS : ["all", "seoul"];
-      for (const s of scopes)
+      for (const s of ["all", "seoul"])
+        paths.push(`/api/recent?dataset=${ds}&scope=${s}&yyyymm=${ym}&limit=300&date=${d}`);
+    }
+  }
+  await warmPaths(paths);
+}
+
+// cron C (오늘의실거래 시도탭): recent 시도 × 최근 14일 × 전 데이터셋. (~750 요청)
+const RECENT_SIDOS = WARM_SIDOS.filter((s) => s !== "all" && s !== "seoul");
+async function warmRecentSido(): Promise<void> {
+  const paths: string[] = [];
+  const dsets = enabledDatasets().map((d) => d.key);
+  for (const ds of dsets) {
+    for (let i = 0; i < 14; i++) {
+      const dt = shiftDays(i);
+      if (!dt) continue;
+      const ym = dt.slice(0, 6);
+      const d = `${dt.slice(0, 4)}-${dt.slice(4, 6)}-${dt.slice(6, 8)}`;
+      for (const s of RECENT_SIDOS)
         paths.push(`/api/recent?dataset=${ds}&scope=${encodeURIComponent(s)}&yyyymm=${ym}&limit=300&date=${d}`);
     }
   }
   await warmPaths(paths);
 }
 
-// cron B (지역): 시군구 상세(거래목록 + 단지지도) 당월. 250개 × 2 = ~500 요청.
+// cron B (지역): 시군구 상세(거래목록 + 단지지도 + 12개월 추이) 당월. 250개 × 3 = ~750 요청.
+// 추이(range)는 RegionDetail 이 부르는 고정 범위(최근 12개월)와 정확히 일치시킴.
 async function warmRegions(): Promise<void> {
   const curM = curYmd();
+  const from = shiftYmd(curM, -11); // fetchTrend(sggCd, shiftMonth(yyyymm,-11), yyyymm)
   const paths: string[] = [];
   for (const cd of SGG_CODES) {
     paths.push(`/api/transactions?dataset=aptTrade&region=${cd}&yyyymm=${curM}`);
     paths.push(`/api/aptmap?dataset=aptTrade&region=${cd}&yyyymm=${curM}&limit=40`);
+    paths.push(`/api/transactions/range?dataset=aptTrade&region=${cd}&from=${from}&to=${curM}`);
+    paths.push(`/api/complexes?dataset=aptTrade&region=${cd}`);
   }
   await warmPaths(paths);
 }
 
-// 수동 트리거(admin/warm)·초기화용: 둘 다 순차 실행.
+// 수동 트리거(admin/warm)·초기화용: 전부 순차 실행.
 async function warmCaches(): Promise<void> {
   await warmCore();
+  await warmRecentSido();
   await warmRegions();
 }
 
@@ -800,10 +824,12 @@ export default {
   //   "15,45" → 지역 워밍(시군구 거래목록/단지지도)
   async scheduled(event: ScheduledController, env: Env, ctx: ExecutionContext) {
     if (event.cron === "15,45 * * * *") {
-      ctx.waitUntil(warmRegions());
+      ctx.waitUntil(warmRegions());          // cron B: 시군구 상세
+    } else if (event.cron === "7,37 * * * *") {
+      ctx.waitUntil(warmRecentSido());       // cron C: 오늘의실거래 시도탭
     } else {
       ctx.waitUntil(enqueue(env, buildBackfillJobs(2)));
-      ctx.waitUntil(warmCore());
+      ctx.waitUntil(warmCore());             // cron A: 대시보드/통계/오늘의실거래(전국·서울)
     }
   },
 

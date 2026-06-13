@@ -19,11 +19,14 @@ export async function GET(req: Request): Promise<Response> {
   if (upstreamCC.includes("no-store")) {
     h.set("cache-control", "no-store");
   } else {
-    // 업스트림 max-age 를 그대로 s-maxage 로 사용(과거 날짜=장기). 만료돼도 SWR 로
-    // 캐시본 즉시 서빙 + 백그라운드 갱신 → 사용자는 MISS 대기 안 함(최초 1회만).
     const m = /max-age=(\d+)/.exec(upstreamCC);
     const sMaxage = m ? Math.max(60, parseInt(m[1], 10)) : 300;
-    h.set("cache-control", `public, s-maxage=${sMaxage}, stale-while-revalidate=604800`);
+    const cdn = `public, s-maxage=${sMaxage}, stale-while-revalidate=604800`;
+    // Vercel CDN(서울 엣지)이 캐시하도록: Vercel-CDN-Cache-Control 이 최우선.
+    // 브라우저는 항상 엣지 재검증(작은 max-age) → HIT 시 ~수ms.
+    h.set("vercel-cdn-cache-control", cdn);
+    h.set("cdn-cache-control", cdn);
+    h.set("cache-control", "public, max-age=0, must-revalidate");
   }
   h.set("access-control-allow-origin", "*");
   return new Response(body, { status: upstream.status, headers: h });
