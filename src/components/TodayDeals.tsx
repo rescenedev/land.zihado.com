@@ -52,24 +52,24 @@ export function TodayDeals({ initialDeals }: { initialDeals?: Transaction[] | nu
   const [dataset, setDataset] = useState("aptTrade");
   const [sido, setSido] = useState("전국");
   const [date, setDate] = useState(todayStr());
+  const hasSeed = !!initialDeals && initialDeals.length > 0;
   // 서버 SSR 초기 거래(오늘·전국·매매)로 seed → 첫 페인트에 즉시(스켈레톤 제거)
   const [deals, setDeals] = useState<Transaction[]>(initialDeals ?? []);
-  const [loading, setLoading] = useState(!initialDeals);
+  const [loading, setLoading] = useState(!hasSeed);
   const [selected, setSelected] = useState<{ region: string; apt: string; umdNm?: string; jibun?: string } | null>(null);
-  // SSR seed 가 있으면 첫 effect 의 재fetch 스킵(데이터 이미 신선·ISR). 이후 파라미터 변경만 fetch.
-  const seeded = useRef(!!initialDeals);
+  const firstRun = useRef(true);
 
   const today = todayStr();
   const isToday = date === today;
   const isFuture = date > today;
 
   useEffect(() => {
-    if (seeded.current) {
-      seeded.current = false;
-      return;
-    }
     let alive = true;
-    setLoading(true);
+    // 첫 마운트 + SSR seed 있으면 스켈레톤 없이 백그라운드 갱신만(seed 즉시 표시 유지).
+    // seed 없거나 파라미터 변경이면 스켈레톤 표시.
+    const skipSkeleton = firstRun.current && hasSeed;
+    firstRun.current = false;
+    if (!skipSkeleton) setLoading(true);
     fetchRecent(ymdOfDate(date), scopeOf(sido), dataset, 300, date)
       .then((r) => alive && setDeals(r.deals))
       .finally(() => alive && setLoading(false));
