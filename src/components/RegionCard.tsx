@@ -20,6 +20,7 @@ export function RegionCard({
   rank,
   maxInSet,
   onClick,
+  onHover,
   newCount = 0,
   glow = false,
 }: {
@@ -27,6 +28,7 @@ export function RegionCard({
   rank: number;
   maxInSet: number;
   onClick: () => void;
+  onHover?: () => void; // hover 시 드릴다운 데이터 프리페치 (클릭 시 즉시 표시)
   newCount?: number; // 최근 신규 신고 거래 수 (>0 이면 배지)
   glow?: boolean; // 신규 활동 상위 지역만 glow
 }) {
@@ -39,6 +41,7 @@ export function RegionCard({
   return (
     <button
       onClick={onClick}
+      onMouseEnter={onHover}
       className={`group flex flex-col rounded-2xl border p-4 text-left transition hover:bg-[#13203a] ${
         fresh
           ? "border-blue-500/50 bg-[#101d36] shadow-[0_0_0_1px_rgba(59,130,246,0.35),0_0_18px_-3px_rgba(59,130,246,0.55)] hover:border-blue-400"

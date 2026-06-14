@@ -5,6 +5,8 @@ import {
   fetchOverview,
   fetchAptMap,
   fetchRecent,
+  fetchTransactions,
+  fetchTrend,
   shiftMonth,
   ymdOf,
   type RegionRow,
@@ -444,6 +446,15 @@ export default function HomeClient({
     }
   }, []);
 
+  // 구 카드 hover 시 거래목록·추이를 미리 받아둠(_mem 캐시) → 클릭 시 RegionDetail 즉시 채움.
+  const prefetchRegion = useCallback(
+    (sggCd: string) => {
+      fetchTransactions(sggCd, yyyymm, dataset).catch(() => {});
+      fetchTrend(sggCd, shiftMonth(yyyymm, -11), yyyymm, dataset).catch(() => {});
+    },
+    [yyyymm, dataset]
+  );
+
   const exitGu = useCallback(() => {
     setMapDetail(null);
     setAptFocus(null);
@@ -602,6 +613,7 @@ export default function HomeClient({
             title={detail.title}
             yyyymm={yyyymm}
             dataset={dataset}
+            seed={regions.find((r) => r.sggCd === detail.sggCd)}
             onBack={() => setDetail(null)}
           />
         ) : view === "stats" ? (
@@ -637,6 +649,7 @@ export default function HomeClient({
                       title={mapDetail.title}
                       yyyymm={yyyymm}
                       dataset={dataset}
+                      seed={regions.find((r) => r.sggCd === mapDetail.sggCd)}
                       onBack={exitGu}
                     />
                   </div>
@@ -659,6 +672,7 @@ export default function HomeClient({
                         ? setSelectedSido(card.title)
                         : setDetail({ sggCd: card.key, title: card.title })
                     }
+                    onHover={card.isSido ? undefined : () => prefetchRegion(card.key)}
                   />
                 ))}
               </div>

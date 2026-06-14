@@ -22,12 +22,14 @@ export function RegionDetail({
   title,
   yyyymm,
   dataset = "aptTrade",
+  seed,
   onBack,
 }: {
   sggCd: string;
   title: string;
   yyyymm: string;
   dataset?: string;
+  seed?: RegionRow | null; // overview 에서 이미 받은 이 구의 집계 → 카드·스파크라인 즉시 표시
   onBack: () => void;
 }) {
   const [items, setItems] = useState<Transaction[]>([]);
@@ -99,6 +101,22 @@ export function RegionDetail({
       min: Math.min(...a),
     };
   }, [filtered]);
+
+  // 카드에 표시할 통계: 실제 거래목록이 오기 전엔 overview seed 집계로 즉시 채움(− 방지).
+  // 검색어가 있으면 필터 결과가 필요하므로 seed 미사용. 목록 도착 시 stats 로 자동 교체.
+  const displayStats = useMemo(() => {
+    if (stats) return stats;
+    if (keyword.trim()) return null;
+    if (seed && seed.count > 0)
+      return { count: seed.count, avg: seed.avg, max: seed.max, min: seed.min };
+    return null;
+  }, [stats, keyword, seed]);
+
+  // 스파크라인: 실제 추이 도착 전엔 seed.trend(월별 평균 number[])로 즉시 표시.
+  const trendValues = useMemo(
+    () => (trend.length ? trend.map((t) => t.avg) : seed?.trend ?? []),
+    [trend, seed]
+  );
 
   // 동일 시도 내 비교 (순위·평균·최고/최저 대비)
   const compare = useMemo(() => {
@@ -187,7 +205,7 @@ export function RegionDetail({
         <div className="rounded-2xl border border-slate-800 bg-[#111a2e] p-4 lg:col-span-1">
           <span className="text-sm font-medium text-slate-300">최근 12개월 평균가 추이</span>
           <div className="mt-2 w-full">
-            <Sparkline values={trend.map((t) => t.avg)} width={260} height={70} responsive />
+            <Sparkline values={trendValues} width={260} height={70} responsive />
           </div>
           <div className="mt-1 flex justify-between text-[11px] text-slate-500">
             <span>{trend[0]?.month?.slice(2)}</span>
@@ -197,7 +215,7 @@ export function RegionDetail({
         <div className="grid grid-cols-2 gap-3 lg:col-span-2">
           <Stat
             label="거래 건수"
-            value={stats ? `${stats.count}건` : "-"}
+            value={displayStats ? `${displayStats.count}건` : "-"}
             sub={
               compare ? (
                 <RankSub sido={compare.sido} n={compare.n} rank={compare.countRank} unit="거래량" />
@@ -206,13 +224,13 @@ export function RegionDetail({
           />
           <Stat
             label="평균가"
-            value={stats ? formatEok(stats.avg) : "-"}
+            value={displayStats ? formatEok(displayStats.avg) : "-"}
             accent
             sub={
-              stats && compare ? (
+              displayStats && compare ? (
                 <DiffSub
                   base={compare.sidoAvg}
-                  value={stats.avg}
+                  value={displayStats.avg}
                   baseLabel={`${compare.sido} 평균 ${formatEok(compare.sidoAvg)}`}
                 />
               ) : null
@@ -220,11 +238,11 @@ export function RegionDetail({
           />
           <Stat
             label="최고가"
-            value={stats ? formatEok(stats.max) : "-"}
+            value={displayStats ? formatEok(displayStats.max) : "-"}
             sub={
-              stats && compare ? (
+              displayStats && compare ? (
                 <RatioSub
-                  value={stats.max}
+                  value={displayStats.max}
                   base={compare.sidoMax}
                   baseLabel={`${compare.sido} 최고 ${formatEok(compare.sidoMax)}`}
                 />
@@ -233,12 +251,12 @@ export function RegionDetail({
           />
           <Stat
             label="최저가"
-            value={stats ? formatEok(stats.min) : "-"}
+            value={displayStats ? formatEok(displayStats.min) : "-"}
             sub={
-              stats && compare ? (
+              displayStats && compare ? (
                 <span className="text-slate-500">
                   {compare.sido} 최저 {formatEok(compare.sidoMin)}
-                  {stats.min <= compare.sidoMin && (
+                  {displayStats.min <= compare.sidoMin && (
                     <span className="ml-1 text-amber-400">· 최저</span>
                   )}
                 </span>
