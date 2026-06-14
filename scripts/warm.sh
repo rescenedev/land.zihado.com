@@ -14,8 +14,8 @@ for p in / /today /stats /map /presale /rent /complex; do warm "$B$p"; done
 echo "2) 오늘의실거래 최근 14일 날짜경로 (HTML+RSC)"
 for i in $(seq 1 14); do warm "$B/today/$(date -v-"${i}"d +%Y-%m-%d)"; done
 
-echo "3) 워커 워밍 트리거 (전 데이터셋: core/regions=매매+전월세, regions-past=매매과거+분양권, recent-sido, complexes)"
-for which in core regions regions-past recent-sido complexes; do
+echo "3) 워커 워밍 트리거 (전 데이터셋: core/regions=매매+전월세, regions-past=매매과거, regions-past2=전월세·분양권 과거, recent-sido, complexes)"
+for which in core regions regions-past regions-past2 recent-sido complexes; do
   curl -s -X POST "$W/api/admin/warm?which=$which" -o /dev/null
 done
 

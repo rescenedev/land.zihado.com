@@ -695,13 +695,14 @@ app.post("/api/admin/backfill", async (c) => {
 
 // 캐시 워밍 즉시 트리거 (cron 안 기다리고 Vercel+CF 전부 데움)
 app.post("/api/admin/warm", async (c) => {
-  const which = c.req.query("which"); // core | recent-sido | regions | regions-past | complexes | (기본 전부)
+  const which = c.req.query("which"); // core | recent-sido | regions | regions-past | regions-past2 | complexes | (기본 전부)
   // 각 which 는 단일 invocation(≤1000 subrequest) — 데이터셋을 cron 과 동일하게 분할.
   c.executionCtx.waitUntil(
     which === "core" ? warmCore()
       : which === "recent-sido" ? (async () => { await warmRecentSido(["aptTrade"]); await warmRecentSido(["aptRent", "silvTrade"], 7); })()
       : which === "regions" ? warmRegions(["aptTrade", "aptRent"])
       : which === "regions-past" ? (async () => { await warmRegionsPast(["aptTrade"]); await warmRegions(["silvTrade"]); })()
+      : which === "regions-past2" ? warmRegionsPast(["aptRent", "silvTrade"]) // 과거월 전월세·분양권 tx (cron 38)
       : which === "complexes" ? enqueueComplexWarm(c.env)
       : warmCaches(c.env)
   );
@@ -959,6 +960,10 @@ export default {
         await warmRegionsPast(["aptTrade"]); // 과거 2개월 매매
         await warmRegions(["silvTrade"]);    // 당월 분양권 tx/range
       })());
+    } else if (event.cron === "38 0 * * *") {
+      // 과거 2개월 전월세·분양권 지역상세 tx (기준월 네비). 누락 시 첫 진입 콜드(실측 1.8s).
+      // 2데이터셋 × 2개월 × 128코드 = 512 subreq (한도 내).
+      ctx.waitUntil(warmRegionsPast(["aptRent", "silvTrade"]));
     } else if (event.cron === "42 0 * * *") {
       ctx.waitUntil(enqueueComplexWarm(env)); // 단지 상세 모달 KV 워밍(당월 단지 전부, 큐 분산)
     } else {
