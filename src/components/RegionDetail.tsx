@@ -5,6 +5,7 @@ import {
   fetchTransactions,
   fetchTrend,
   fetchOverview,
+  fetchComplexDeals,
   shiftMonth,
   type Transaction,
   type TrendPoint,
@@ -277,7 +278,12 @@ export function RegionDetail({
       ) : (
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
           {filtered.map((tx, i) => (
-            <TxCard key={i} tx={tx} onClick={() => setSelectedApt({ apt: tx.aptName, umdNm: tx.umdNm, jibun: tx.jibun })} />
+            <TxCard
+              key={i}
+              tx={tx}
+              onClick={() => setSelectedApt({ apt: tx.aptName, umdNm: tx.umdNm, jibun: tx.jibun })}
+              onHover={() => fetchComplexDeals(sggCd, tx.aptName, shiftMonth(yyyymm, -11), yyyymm, dataset).catch(() => {})}
+            />
           ))}
         </div>
       )}
@@ -297,12 +303,13 @@ export function RegionDetail({
   );
 }
 
-function TxCard({ tx, onClick }: { tx: Transaction; onClick: () => void }) {
+function TxCard({ tx, onClick, onHover }: { tx: Transaction; onClick: () => void; onHover?: () => void }) {
   const age = tx.buildYear ? THIS_YEAR - tx.buildYear : 0;
   const cancelled = tx.cdealType === "O";
   return (
     <button
       onClick={onClick}
+      onMouseEnter={onHover}
       className="rounded-2xl border border-slate-800 bg-[#111a2e] p-4 text-left transition hover:border-blue-500/60 hover:bg-[#13203a]"
     >
       <div className="flex items-start justify-between gap-2">
