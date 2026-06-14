@@ -71,7 +71,12 @@ export function Shell({ children }: { children: ReactNode }) {
                 key={n.href}
                 href={n.href}
                 prefetch
-                onClick={closeOnMobile}
+                onClick={() => {
+                  closeOnMobile();
+                  // 이미 활성 라우트를 다시 클릭하면 라우트 변경이 없어 페이지 상태가 그대로 →
+                  // 드릴다운(시도·지역 선택)을 초기화하도록 신호 발행 (HomeClient 가 수신).
+                  if (active) window.dispatchEvent(new CustomEvent("nav-reset", { detail: n.href }));
+                }}
                 aria-current={active ? "page" : undefined}
                 className={`flex items-center justify-between rounded-xl px-3 py-2.5 text-sm transition ${
                   active
