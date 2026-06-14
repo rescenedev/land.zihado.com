@@ -142,6 +142,17 @@ export default function HomeClient({ initialData }: { initialData?: OverviewResp
     return () => { alive = false; };
   }, [yyyymm, dataset]);
 
+  // 오늘의 실거래 기본 뷰(오늘·전국) prefetch → 사이드바 클릭 시 클라 캐시 HIT, 스켈레톤 깜빡임 제거.
+  // 랜딩 임계 렌더와 경쟁 안 하게 약간 지연(공유 _mem 캐시라 TodayDeals 가 그대로 재사용).
+  useEffect(() => {
+    const t = setTimeout(() => {
+      const d = new Date();
+      const dateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+      fetchRecent(ymdOf(d), "all", dataset, 300, dateStr).catch(() => {});
+    }, 700);
+    return () => clearTimeout(t);
+  }, [dataset]);
+
   // scope/시도/월 변경 시 드릴다운·단지레이어 초기화 (selectedSido 는 칩이 제어)
   useEffect(() => {
     setDetail(null);
