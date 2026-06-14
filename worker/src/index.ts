@@ -523,7 +523,9 @@ app.get("/api/aptmap", async (c) => {
   // 전부 지오코딩되면 정상 TTL, 일부 실패 시 짧은 TTL(좌표는 apt_coords 에 영속 →
   // 다음 요청에서 누락분만 재시도하며 점진적으로 채워짐). aggs 가 비면 캐시 안 함.
   if (aggs.length > 0) {
-    const ttl = items.length >= aggs.length ? respTtl(yyyymm) : 300;
+    // ≥97% 지오코딩되면 정상 TTL(25h). 불량주소 소수(영구 실패)는 허용 — 안 그러면
+    // 그 구 aptmap 이 영영 300s 콜드(items>=aggs 영원히 거짓). 좌표는 apt_coords 에 영속.
+    const ttl = items.length >= Math.floor(aggs.length * 0.97) ? respTtl(yyyymm) : 300;
     c.executionCtx.waitUntil(
       c.env.CACHE.put(aptmapKey, JSON.stringify(result), { expirationTtl: ttl })
     );
