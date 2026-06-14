@@ -464,6 +464,68 @@ export default function HomeClient({
           ))}
         </div>
 
+        {/* 컨트롤 바: [월] [시도칩 2줄 wrap·중앙] [뷰토글] */}
+        <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-start">
+          {/* 모바일: 월선택 + 뷰토글 한 줄, 시도칩 아래 전체폭 / 데스크톱: 3단 한 줄 */}
+          <div className="flex items-center justify-between gap-2 sm:contents">
+          <div className="flex shrink-0 items-center gap-1 rounded-lg border border-slate-700 bg-slate-800/40 p-1">
+            <NavBtn onClick={() => setYyyymm((m) => shiftMonth(m, -1))}>‹</NavBtn>
+            <span className="min-w-[88px] text-center text-sm font-semibold text-slate-100">
+              {yyyymm.slice(0, 4)}.{yyyymm.slice(4, 6)}
+            </span>
+            <NavBtn onClick={() => setYyyymm((m) => shiftMonth(m, 1))}>›</NavBtn>
+          </div>
+          {/* 뷰토글: 모바일에선 월선택과 같은 줄(여기), 데스크톱에선 sm:contents로 원위치 */}
+          <div className="flex shrink-0 items-center gap-1 rounded-lg bg-slate-800/60 p-1 text-sm sm:hidden">
+            <Seg active={view === "cards"} onClick={() => setView("cards")}>카드</Seg>
+            <Seg active={view === "map"} onClick={() => setView("map")}>지도</Seg>
+            <Seg active={view === "stats"} onClick={() => setView("stats")}>통계</Seg>
+          </div>
+          </div>
+
+          <div className="flex flex-1 flex-wrap content-start gap-1.5">
+            {SIDO_TABS.map((sd) => {
+              const active =
+                sd === "전국"
+                  ? scope === "all" && !selectedSido
+                  : sd === "서울"
+                    ? scope === "seoul"
+                    : selectedSido === sd;
+              return (
+                <button
+                  key={sd}
+                  onClick={() => selectSido(sd)}
+                  onMouseEnter={() => {
+                    // 전국↔서울만 새 fetch가 발생 — 나머지는 selectedSido 필터만
+                    if (sd === "전국" && scope !== "all")
+                      fetchOverview(yyyymm, "all", dataset).catch(() => {});
+                    if (sd === "서울" && scope !== "seoul")
+                      fetchOverview(yyyymm, "seoul", dataset).catch(() => {});
+                  }}
+                  className={`shrink-0 rounded-full px-3 py-1.5 text-sm font-medium transition ${
+                    active
+                      ? "bg-blue-600 text-white"
+                      : sd !== "전국" && isHot(sd, true)
+                        ? "bg-blue-500/15 text-blue-300 shadow-[0_0_10px_-2px_rgba(59,130,246,0.6)] ring-1 ring-blue-500/40"
+                        : "bg-slate-800/60 text-slate-400 hover:text-slate-200"
+                  }`}
+                >
+                  {sd}
+                  {sd !== "전국" && (newBySido[sd] ?? 0) > 0 && (
+                    <span className={`ml-1 text-[10px] ${active ? "text-blue-200" : "text-blue-400"}`}>+{newBySido[sd]}</span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+
+          <div className="hidden shrink-0 items-center gap-1 rounded-lg bg-slate-800/60 p-1 text-sm sm:flex">
+            <Seg active={view === "cards"} onClick={() => setView("cards")}>카드</Seg>
+            <Seg active={view === "map"} onClick={() => setView("map")}>지도</Seg>
+            <Seg active={view === "stats"} onClick={() => setView("stats")}>통계</Seg>
+          </div>
+        </div>
+
         {/* KPI */}
         <div className="mb-6 grid grid-cols-2 gap-3 lg:grid-cols-4">
           <Kpi
@@ -533,68 +595,6 @@ export default function HomeClient({
             value={visibleTotals ? `${visibleTotals.loaded}/${visibleTotals.regions}` : "-"}
             sub={collecting ? `수집 중 ${progress}%` : "완료"}
           />
-        </div>
-
-        {/* 컨트롤 바: [월] [시도칩 2줄 wrap·중앙] [뷰토글] */}
-        <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-start">
-          {/* 모바일: 월선택 + 뷰토글 한 줄, 시도칩 아래 전체폭 / 데스크톱: 3단 한 줄 */}
-          <div className="flex items-center justify-between gap-2 sm:contents">
-          <div className="flex shrink-0 items-center gap-1 rounded-lg border border-slate-700 bg-slate-800/40 p-1">
-            <NavBtn onClick={() => setYyyymm((m) => shiftMonth(m, -1))}>‹</NavBtn>
-            <span className="min-w-[88px] text-center text-sm font-semibold text-slate-100">
-              {yyyymm.slice(0, 4)}.{yyyymm.slice(4, 6)}
-            </span>
-            <NavBtn onClick={() => setYyyymm((m) => shiftMonth(m, 1))}>›</NavBtn>
-          </div>
-          {/* 뷰토글: 모바일에선 월선택과 같은 줄(여기), 데스크톱에선 sm:contents로 원위치 */}
-          <div className="flex shrink-0 items-center gap-1 rounded-lg bg-slate-800/60 p-1 text-sm sm:hidden">
-            <Seg active={view === "cards"} onClick={() => setView("cards")}>카드</Seg>
-            <Seg active={view === "map"} onClick={() => setView("map")}>지도</Seg>
-            <Seg active={view === "stats"} onClick={() => setView("stats")}>통계</Seg>
-          </div>
-          </div>
-
-          <div className="flex flex-1 flex-wrap content-start gap-1.5">
-            {SIDO_TABS.map((sd) => {
-              const active =
-                sd === "전국"
-                  ? scope === "all" && !selectedSido
-                  : sd === "서울"
-                    ? scope === "seoul"
-                    : selectedSido === sd;
-              return (
-                <button
-                  key={sd}
-                  onClick={() => selectSido(sd)}
-                  onMouseEnter={() => {
-                    // 전국↔서울만 새 fetch가 발생 — 나머지는 selectedSido 필터만
-                    if (sd === "전국" && scope !== "all")
-                      fetchOverview(yyyymm, "all", dataset).catch(() => {});
-                    if (sd === "서울" && scope !== "seoul")
-                      fetchOverview(yyyymm, "seoul", dataset).catch(() => {});
-                  }}
-                  className={`shrink-0 rounded-full px-3 py-1.5 text-sm font-medium transition ${
-                    active
-                      ? "bg-blue-600 text-white"
-                      : sd !== "전국" && isHot(sd, true)
-                        ? "bg-blue-500/15 text-blue-300 shadow-[0_0_10px_-2px_rgba(59,130,246,0.6)] ring-1 ring-blue-500/40"
-                        : "bg-slate-800/60 text-slate-400 hover:text-slate-200"
-                  }`}
-                >
-                  {sd}
-                  {sd !== "전국" && (newBySido[sd] ?? 0) > 0 && (
-                    <span className={`ml-1 text-[10px] ${active ? "text-blue-200" : "text-blue-400"}`}>+{newBySido[sd]}</span>
-                  )}
-                </button>
-              );
-            })}
-          </div>
-
-          <div className="hidden shrink-0 items-center gap-1 rounded-lg bg-slate-800/60 p-1 text-sm sm:flex">
-            <Seg active={view === "cards"} onClick={() => setView("cards")}>카드</Seg>
-            <Seg active={view === "map"} onClick={() => setView("map")}>지도</Seg>
-            <Seg active={view === "stats"} onClick={() => setView("stats")}>통계</Seg>
-          </div>
         </div>
 
         {error && (
