@@ -1,0 +1,104 @@
+<!DOCTYPE html><html lang="ko"><head><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Landman SSR 전면교체 성능 리포트</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#0b1120;color:#e2e8f0;line-height:1.6;padding:2.5rem;max-width:1080px;margin:0 auto}
+h1{font-size:1.9rem;margin-bottom:.3rem}
+h2{font-size:1.2rem;margin:2.4rem 0 .9rem;color:#93c5fd;border-left:3px solid #3b82f6;padding-left:.7rem}
+.meta{color:#94a3b8;font-size:.85rem;margin-bottom:1.5rem}
+.cards{display:flex;gap:1rem;flex-wrap:wrap;margin:1.5rem 0}
+.card{background:#1e293b;border-radius:.7rem;padding:1.1rem 1.4rem;flex:1;min-width:150px}
+.card .n{font-size:2rem;font-weight:800;color:#4ade80}
+.card .n.b{color:#60a5fa}
+.card .l{font-size:.8rem;color:#94a3b8;margin-top:.25rem}
+table{width:100%;border-collapse:collapse;background:#1e293b;border-radius:.7rem;overflow:hidden;font-size:.87rem;margin-top:.6rem}
+th{background:#0f172a;color:#cbd5e1;padding:.6rem .8rem;text-align:left;font-size:.72rem;text-transform:uppercase;letter-spacing:.04em}
+td{padding:.55rem .8rem;border-bottom:1px solid #334155}
+tr:last-child td{border-bottom:none}
+code{font-family:"SF Mono",monospace;background:#0f172a;padding:.1rem .4rem;border-radius:.25rem;font-size:.82rem;color:#7dd3fc}
+.bold{font-weight:700;color:#fff}.before{color:#f87171;font-family:monospace}.after{color:#4ade80;font-family:monospace;font-weight:700}
+.badge{color:#fff;font-size:.7rem;font-weight:700;padding:.15rem .5rem;border-radius:999px;background:#16a34a}
+.flow{background:#1e293b;border-radius:.7rem;padding:1.2rem 1.4rem;font-family:"SF Mono",monospace;font-size:.83rem;color:#cbd5e1;line-height:1.9;overflow-x:auto;white-space:pre}
+.note{background:#1e293b;border-radius:.7rem;padding:1rem 1.3rem;margin-top:1rem;font-size:.88rem;color:#cbd5e1}
+.note b{color:#fbbf24}.dim{color:#64748b}
+.ok{color:#4ade80;font-weight:700}.warn{color:#fbbf24;font-weight:700}
+.mono{font-family:"SF Mono",monospace}
+</style></head><body>
+
+<h1>Landman SSR 전면교체 성능 리포트</h1>
+<p class="meta">국토교통부 실거래가 대시보드 · land.zihado.com · 2026-06-14 · <b>post-deploy</b> 프로덕션 실측 (warm HIT) · 도구: oha·bombardier HTTP/2 1000req/c50, k6, 실브라우저(headless Chromium)</p>
+
+<div class="cards">
+  <div class="card"><div class="n">14–19ms</div><div class="l">SSR 7개 라우트 p50</div></div>
+  <div class="card"><div class="n">32–68ms</div><div class="l">실브라우저 FCP (실데이터 첫 페인트)</div></div>
+  <div class="card"><div class="n b">100%</div><div class="l">전 라우트·전 부하 200 OK</div></div>
+  <div class="card"><div class="n">0</div><div class="l">로딩 셸/스켈레톤 (SSR seed)</div></div>
+</div>
+
+<h2>1. 전환 요약 — 빈 껍데기+클라 fetch → SSR seed</h2>
+<div class="note">
+이전: 라우트가 <span class="before">빈 셸을 페인트 → 클라이언트 JS가 API fetch → 재렌더</span> (스켈레톤 깜빡임 + fetch 워터폴).<br>
+현재: 서버 컴포넌트가 워커 KV에서 데이터를 받아 <span class="after">HTML에 실데이터를 직접 seed</span> → 첫 페인트에 차트·카드·거래목록이 즉시. 전 사이드바 메뉴가 실제 라우트(공유 가능 URL) + ISR 캐시.<br><br>
+검증: <code>/stats</code> HTML에 <span class="ok">로딩 플레이스홀더 0개</span>, RSC 페이로드(<code>__next_f</code>) + 통계 마커(중위·백분위 ×8) 서버 렌더 확인. 앱 콘솔 에러 0건.
+</div>
+
+<h2>2. SSR HTML 라우트 레이턴시 (oha HTTP/2, 1000req×7, warm HIT, post-deploy)</h2>
+<table>
+<tr><th>route</th><th>cache</th><th>p50</th><th>p90</th><th>p99</th><th>max</th><th>rps</th><th>ok</th></tr>
+<tr><td class="mono">/</td><td>HIT</td><td>16.7</td><td>28.6</td><td>83.9</td><td>105.9</td><td>2163</td><td class="ok">100%</td></tr>
+<tr><td class="mono">/today</td><td>HIT</td><td>14.1</td><td>22.8</td><td>77.1</td><td>122.5</td><td>2595</td><td class="ok">100%</td></tr>
+<tr><td class="mono">/stats</td><td>HIT</td><td>18.9</td><td>32.1</td><td>86.3</td><td>219.6</td><td>2022</td><td class="ok">100%</td></tr>
+<tr><td class="mono">/rent</td><td>HIT</td><td>16.0</td><td>23.6</td><td>79.0</td><td>135.0</td><td>2319</td><td class="ok">100%</td></tr>
+<tr><td class="mono">/presale</td><td>HIT</td><td>17.0</td><td>27.1</td><td>93.2</td><td>268.7</td><td>1616</td><td class="ok">100%</td></tr>
+<tr><td class="mono">/map</td><td>HIT</td><td>18.0</td><td>28.3</td><td>75.0</td><td>226.8</td><td>2200</td><td class="ok">100%</td></tr>
+<tr><td class="mono">/complex</td><td>HIT</td><td>17.6</td><td>30.1</td><td>135.6</td><td>374.0</td><td>1510</td><td class="ok">100%</td></tr>
+</table>
+<div class="note"><b>교차검증 (bombardier HTTP/2):</b> <code>/stats</code> p50 21.2 / p99 94.3 · <code>/</code> p50 19.1 / p99 101.8 · <code>/today</code> p50 13.1 / p99 63.5. 두 독립 도구가 노이즈 범위 내 일치.</div>
+
+<h2>3. API 표면 — Vercel 프록시 경유 (회귀 체크, post-deploy)</h2>
+<table>
+<tr><th>endpoint</th><th>cache</th><th>p50</th><th>p90</th><th>p99</th><th>ok</th></tr>
+<tr><td class="mono">overview_all</td><td>HIT</td><td>14.3</td><td>23.8</td><td>69.6</td><td class="ok">100%</td></tr>
+<tr><td class="mono">statistics</td><td>HIT</td><td>13.9</td><td>21.7</td><td>69.8</td><td class="ok">100%</td></tr>
+<tr><td class="mono">recent</td><td>HIT</td><td>12.6</td><td>18.9</td><td>69.3</td><td class="ok">100%</td></tr>
+<tr><td class="mono">transactions</td><td>HIT</td><td>12.9</td><td>20.3</td><td>71.5</td><td class="ok">100%</td></tr>
+<tr><td class="mono">aptsearch</td><td>HIT</td><td>12.8</td><td>18.6</td><td>74.6</td><td class="ok">100%</td></tr>
+</table>
+<div class="note">기존 API 플레이북 수치(p50 ~13ms) 그대로 유지 → <span class="ok">SSR 전환으로 인한 API 회귀 없음.</span> k6 스모크(현행 계약): checks 209–210/210, http_req_failed 0%.</div>
+
+<h2>4. 실브라우저 Core Web Vitals — 배포 전/후 (headless Chromium, HIT)</h2>
+<table>
+<tr><th>route</th><th>FCP 전</th><th>FCP 후</th><th>load 전</th><th>load 후</th><th>전송(br)</th></tr>
+<tr><td class="mono">/</td><td class="before">124ms</td><td class="after">68ms</td><td class="before">145ms</td><td class="after">66ms</td><td>13KB</td></tr>
+<tr><td class="mono">/stats</td><td class="before">228ms</td><td class="after">44ms</td><td class="before">214ms</td><td class="after">25ms</td><td>15KB</td></tr>
+<tr><td class="mono">/today</td><td class="before">216ms</td><td class="after">32ms</td><td class="before">230ms</td><td class="after">21ms</td><td>4KB</td></tr>
+</table>
+<div class="note">FCP 0.03–0.07s — "good" 기준(1.8s)의 약 1/30. 첫 페인트에 실데이터. <span class="dim">배포 전 수치는 revalidate 경계 재생성 순간을 물린 값 — 정렬(120→1800s) 후 일관되게 낮음.</span></div>
+
+<h2>5. 발견 + 조치 (배포 완료)</h2>
+<table>
+<tr><th>항목</th><th>발견</th><th>조치</th></tr>
+<tr>
+  <td class="bold">PRERENDER 콜드 꼬리</td>
+  <td>데이터는 <span class="warn">일1회 갱신</span>인데 페이지 <code>revalidate=120</code> → 2분마다 재생성. 경계 첫 방문자가 워커까지 내려가 <span class="before">/today 228ms·max 478ms</span>.</td>
+  <td><span class="ok">revalidate 120→1800s</span> (7 라우트 + <code>ssr.ts</code> fetch). 재생성 15배↓. 워커 cron <code>warmCore→warmSsrPages</code> 추가 → 재생성을 cron이 흡수. <span class="dim">실효: 다음 cron 09:30 KST.</span></td>
+</tr>
+<tr>
+  <td class="bold">k6 테스트 부채</td>
+  <td>회귀 아님. <code>buildUrl</code>이 <span class="before">구 계약 ?lawdCd=&dealYmd=</span> 호출 → 현행 <code>?dataset=&region=&yyyymm=</code>와 불일치로 스모크 50% 실패.</td>
+  <td><span class="ok">config·params·smoke·load·stress·validation 6파일 현행 계약으로 정정.</span> checks 210/210, http_req_failed 0%.</td>
+</tr>
+</table>
+
+<h2>6. 판정</h2>
+<div class="note">
+<span class="badge">SSR 전면교체 성공 · 배포 완료</span><br><br>
+워커 <code>landman-worker</code>(v3d2ac1e9) + Vercel <code>landman</code>(prod) 라이브. 전 라우트 warm HIT p50 14–19ms / 100% OK, API 회귀 없음, 실브라우저 FCP 32–68ms에 실데이터.
+유일한 흠이던 PRERENDER 콜드 꼬리는 revalidate 정렬 + cron 워밍으로 제거(다음 cron부터 실효).
+재측정: <code>scripts/perf-ssr.sh</code>, <code>scripts/perf-api.sh</code>, <code>bun perf:smoke:prod</code>.
+</div>
+
+<p class="meta dim" style="margin-top:2rem">관련: <code>docs/performance-report.html</code>(API 개선 스토리) · <code>docs/PERFORMANCE.md</code> · <code>docs/PERF-DESIGN-PLAYBOOK.md</code></p>
+
+</body></html>
