@@ -42,7 +42,7 @@ cold-read(정상). **진짜 갭은 500ms+ 지속 또는 핫셋 콜드.** 워밍 
 | fetchStatistics | `/api/statistics` | dataset·scope·yyyymm | warmCore: 시도 × 3월 × 전ds | ✅ (3월 초과 콜드) |
 | fetchTransactions | `/api/transactions` | dataset·region·yyyymm | warmRegions(당월)+warmRegionsPast(과거2월), 매매 | ✅매매 / ⚠️전월세·분양권 |
 | fetchRecent | `/api/recent` | dataset·scope·yyyymm·limit·**date** | warmCore(전국/서울 30일)+warmRecentSido(매매 시도 31일) | ✅매매 / ⚠️전월세·분양권 시도 |
-| fetchAptMap | `/api/aptmap` | dataset·region·yyyymm·**limit=500** | warmRegions/Past **limit=500** (키 일치 수정됨) | ✅ |
+| fetchAptMap | `/api/aptmap` | dataset·region·yyyymm·**limit=500** | warmRegions/Past **limit=500** | ✅ (전 단지 지오코딩 완성·97% TTL) |
 | fetchTrend | `/api/transactions/range` | dataset·region·from·to | warmRegions(매매) | ✅매매 |
 | fetchComplexDeals | `/api/complex` | dataset·region·apt·from·to | enqueueComplexWarm 큐(당월 매매 단지) | ✅당월매매 |
 | fetchCoord | `/api/coord` | region·umd·jibun·apt | warmcomplex 큐(대표지번, coord+nearby 동반) | ✅ |
@@ -62,4 +62,4 @@ cold-read(정상). **진짜 갭은 500ms+ 지속 또는 핫셋 콜드.** 워밍 
 - ⚠️ **전월세/분양권 시도탭·지역상세**: cron 제외(저트래픽). warmCore 가 전국/서울은 커버. 첫조회 후 SWR 7일.
 - ⚠️ **3개월 초과 과거월**: 기준월 네비 윈도우 밖. 첫조회 콜드 후 SWR 7일.
 - ⚠️ **aptsearch**: 동적 검색이라 워밍 불가. 첫 검색 비용(통상 빠름).
-- 🔴 **aptmap(지도탭 지역맵, limit=500)**: KV TTL 이 **지오코딩 미완 시 300초**(`items.length < aggs.length` → 좌표 점진 채움 의도). 미완 지역은 워밍해도 5분 후 만료 → 재집계(12개월 agg + 지오코딩) ~320ms 콜드 반복. 근본 해결 = 전 단지 지오코딩 완성(apt_coords) → `items>=aggs` → respTtl(25h) 적용. TODO: geocode 커버리지 완성.
+- ✅ **aptmap(지도탭)**: 해결됨. 전 128구 지오코딩 2패스 완료(31,691단지 중 99.93%, 잔여 21개=불량주소 영구실패). TTL 로직 `items>=aggs*0.97`(영구실패 소수 허용)로 변경 → 25h TTL. 재집계 1875ms→59ms.
