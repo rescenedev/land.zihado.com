@@ -1,0 +1,170 @@
+<!DOCTYPE html><html lang="ko"><head><meta charset="UTF-8">
+<title>성능 테스트 — land.zihado.com</title><style>
+*{box-sizing:border-box;margin:0;padding:0}body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#0f172a;color:#e2e8f0;padding:2.5rem;line-height:1.5}
+h1{font-size:1.6rem}.meta{color:#94a3b8;font-size:.9rem;margin:.4rem 0 1.5rem}
+.kpis{display:flex;gap:1rem;flex-wrap:wrap;margin-bottom:1.5rem}
+.kpi{background:#1e293b;border:1px solid #334155;border-radius:.6rem;padding:1rem 1.3rem;min-width:150px}
+.kpi .v{font-size:1.7rem;font-weight:800;color:#34d399}.kpi .l{font-size:.78rem;color:#94a3b8;text-transform:uppercase;letter-spacing:.04em}
+table{width:100%;border-collapse:collapse;background:#fff;color:#1e293b;border-radius:.6rem;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,.3)}
+th{background:#1e293b;color:#fff;padding:.7rem 1rem;text-align:left;font-size:.74rem;text-transform:uppercase;letter-spacing:.04em}
+td{padding:.55rem 1rem;border-bottom:1px solid #e2e8f0;font-size:.88rem}.b{font-weight:700}
+code{font-family:"SF Mono",monospace;font-size:.82rem;background:rgba(0,0,0,.06);padding:.1rem .35rem;border-radius:.25rem}
+.legend{margin-top:1.2rem;color:#94a3b8;font-size:.82rem}</style></head><body>
+<h1>성능 테스트 — land.zihado.com</h1>
+<p class="meta">실사용 경로(한국→Vercel ICN 엣지) 전 메뉴 스윕 · k6 VU8 · 40반복/VU · keep-alive · 2026-06-14 18:12 KST</p>
+<div class="kpis">
+  <div class="kpi"><div class="v">29</div><div class="l">표면</div></div>
+  <div class="kpi"><div class="v">0.00%</div><div class="l">에러율</div></div>
+  <div class="kpi"><div class="v">≤91ms</div><div class="l">전표면 p95</div></div>
+  <div class="kpi"><div class="v">≤164ms</div><div class="l">전표면 p99</div></div>
+</div>
+<table><thead><tr><th>표면</th><th>종류</th><th>avg</th><th>p50</th><th>p95</th><th>p99</th><th>max</th><th></th></tr></thead>
+<tbody>
+      <tr style="background:#fef9c3">
+        <td><code>api_rent_tx_prev</code></td><td>api</td>
+        <td>58</td><td>53</td>
+        <td class="b">91</td><td class="b">164</td>
+        <td>264</td><td>🟡</td></tr>
+      <tr style="background:#fef9c3">
+        <td><code>page_stats</code></td><td>page</td>
+        <td>24</td><td>18</td>
+        <td class="b">36</td><td class="b">154</td>
+        <td>335</td><td>🟡</td></tr>
+      <tr style="background:#fef9c3">
+        <td><code>api_silv_overview</code></td><td>api</td>
+        <td>21</td><td>17</td>
+        <td class="b">29</td><td class="b">116</td>
+        <td>240</td><td>🟡</td></tr>
+      <tr style="background:#fef9c3">
+        <td><code>api_rent_tx</code></td><td>api</td>
+        <td>28</td><td>25</td>
+        <td class="b">47</td><td class="b">115</td>
+        <td>183</td><td>🟡</td></tr>
+      <tr style="background:#fef9c3">
+        <td><code>page_map</code></td><td>page</td>
+        <td>21</td><td>17</td>
+        <td class="b">36</td><td class="b">110</td>
+        <td>152</td><td>🟡</td></tr>
+      <tr style="background:#fef9c3">
+        <td><code>api_recent</code></td><td>api</td>
+        <td>42</td><td>40</td>
+        <td class="b">60</td><td class="b">106</td>
+        <td>139</td><td>🟡</td></tr>
+      <tr style="background:#fef9c3">
+        <td><code>page_complex</code></td><td>page</td>
+        <td>21</td><td>18</td>
+        <td class="b">33</td><td class="b">100</td>
+        <td>140</td><td>🟡</td></tr>
+      <tr style="background:#fef9c3">
+        <td><code>rsc_today</code></td><td>rsc</td>
+        <td>20</td><td>16</td>
+        <td class="b">31</td><td class="b">95</td>
+        <td>386</td><td>🟡</td></tr>
+      <tr style="background:#fef9c3">
+        <td><code>page_presale</code></td><td>page</td>
+        <td>21</td><td>18</td>
+        <td class="b">32</td><td class="b">93</td>
+        <td>122</td><td>🟡</td></tr>
+      <tr style="background:#fef9c3">
+        <td><code>api_rent_overview</code></td><td>api</td>
+        <td>20</td><td>17</td>
+        <td class="b">31</td><td class="b">87</td>
+        <td>139</td><td>🟡</td></tr>
+      <tr style="background:#fef9c3">
+        <td><code>api_tx_gangnam</code></td><td>api</td>
+        <td>20</td><td>17</td>
+        <td class="b">34</td><td class="b">77</td>
+        <td>134</td><td>🟡</td></tr>
+      <tr style="background:#fef9c3">
+        <td><code>page_rent</code></td><td>page</td>
+        <td>20</td><td>18</td>
+        <td class="b">31</td><td class="b">68</td>
+        <td>152</td><td>🟡</td></tr>
+      <tr style="background:#fef9c3">
+        <td><code>api_overview_seoul</code></td><td>api</td>
+        <td>19</td><td>17</td>
+        <td class="b">30</td><td class="b">66</td>
+        <td>112</td><td>🟡</td></tr>
+      <tr style="background:#fef9c3">
+        <td><code>page_today</code></td><td>page</td>
+        <td>20</td><td>16</td>
+        <td class="b">30</td><td class="b">64</td>
+        <td>327</td><td>🟡</td></tr>
+      <tr style="background:#fef9c3">
+        <td><code>api_tx_gangnam_prev</code></td><td>api</td>
+        <td>23</td><td>21</td>
+        <td class="b">37</td><td class="b">64</td>
+        <td>142</td><td>🟡</td></tr>
+      <tr style="background:#fef9c3">
+        <td><code>page_home</code></td><td>page</td>
+        <td>26</td><td>23</td>
+        <td class="b">41</td><td class="b">60</td>
+        <td>289</td><td>🟡</td></tr>
+      <tr style="background:#fef9c3">
+        <td><code>rsc_home</code></td><td>rsc</td>
+        <td>19</td><td>17</td>
+        <td class="b">32</td><td class="b">56</td>
+        <td>149</td><td>🟡</td></tr>
+      <tr style="background:#fef9c3">
+        <td><code>api_parcel</code></td><td>api</td>
+        <td>19</td><td>16</td>
+        <td class="b">29</td><td class="b">55</td>
+        <td>325</td><td>🟡</td></tr>
+      <tr style="background:#fef9c3">
+        <td><code>api_coord</code></td><td>api</td>
+        <td>18</td><td>17</td>
+        <td class="b">29</td><td class="b">55</td>
+        <td>91</td><td>🟡</td></tr>
+      <tr style="background:#fef9c3">
+        <td><code>api_aptsearch</code></td><td>api</td>
+        <td>19</td><td>17</td>
+        <td class="b">28</td><td class="b">50</td>
+        <td>199</td><td>🟡</td></tr>
+      <tr style="background:#dcfce7">
+        <td><code>api_aptmap</code></td><td>api</td>
+        <td>20</td><td>19</td>
+        <td class="b">31</td><td class="b">49</td>
+        <td>205</td><td>✅</td></tr>
+      <tr style="background:#dcfce7">
+        <td><code>api_statistics</code></td><td>api</td>
+        <td>18</td><td>17</td>
+        <td class="b">25</td><td class="b">47</td>
+        <td>103</td><td>✅</td></tr>
+      <tr style="background:#dcfce7">
+        <td><code>api_overview_all</code></td><td>api</td>
+        <td>19</td><td>18</td>
+        <td class="b">30</td><td class="b">45</td>
+        <td>53</td><td>✅</td></tr>
+      <tr style="background:#dcfce7">
+        <td><code>api_range</code></td><td>api</td>
+        <td>18</td><td>16</td>
+        <td class="b">29</td><td class="b">44</td>
+        <td>74</td><td>✅</td></tr>
+      <tr style="background:#dcfce7">
+        <td><code>api_nearby</code></td><td>api</td>
+        <td>19</td><td>17</td>
+        <td class="b">29</td><td class="b">43</td>
+        <td>129</td><td>✅</td></tr>
+      <tr style="background:#dcfce7">
+        <td><code>api_complex</code></td><td>api</td>
+        <td>17</td><td>16</td>
+        <td class="b">26</td><td class="b">40</td>
+        <td>63</td><td>✅</td></tr>
+      <tr style="background:#dcfce7">
+        <td><code>rsc_stats</code></td><td>rsc</td>
+        <td>19</td><td>17</td>
+        <td class="b">28</td><td class="b">39</td>
+        <td>103</td><td>✅</td></tr>
+      <tr style="background:#dcfce7">
+        <td><code>api_complexes</code></td><td>api</td>
+        <td>18</td><td>17</td>
+        <td class="b">27</td><td class="b">37</td>
+        <td>83</td><td>✅</td></tr>
+      <tr style="background:#dcfce7">
+        <td><code>api_silv_tx</code></td><td>api</td>
+        <td>18</td><td>16</td>
+        <td class="b">26</td><td class="b">35</td>
+        <td>90</td><td>✅</td></tr>
+</tbody></table>
+<p class="legend">단위 ms · 행 색상: ✅ p99≤50ms(초록) · 🟡 ≤200ms(노랑) · 🔴 &gt;200ms(빨강) · max 스파이크는 cold-MISS→도쿄 워커 재생성 단발값(p95/p99 워밍경로와 무관) · 컴퓨트 리전 icn1(서울)</p>
+</body></html>
