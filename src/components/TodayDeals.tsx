@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { type Transaction } from "@/lib/api";
+import { fetchComplexDeals, shiftMonth, type Transaction } from "@/lib/api";
 import { formatDeal, pyeong } from "@/lib/format";
 import { ALL_DISTRICTS } from "@/lib/regions";
 import { ComplexDetail } from "./ComplexDetail";
@@ -191,6 +191,12 @@ export function TodayDeals({
               <button
                 key={`${id}-${i}`}
                 onClick={() => setSelected({ region: tx.sggCd ?? "", apt: tx.aptName, umdNm: tx.umdNm, jibun: tx.jibun })}
+                onMouseEnter={() => {
+                  // 단지 상세 거래이력을 hover 시 미리 받아둠(_mem 캐시) → 클릭 시 모달 즉시.
+                  // 콜드 단지(워밍 밖)는 첫 진입이 ~0.5s라 hover 한 박자로 흡수.
+                  const ym = ymdOfDate(date);
+                  fetchComplexDeals(tx.sggCd ?? "", tx.aptName, shiftMonth(ym, -11), ym, dataset).catch(() => {});
+                }}
                 className="flex flex-col gap-1.5 rounded-xl border border-slate-800 bg-[#111a2e] px-4 py-3 text-left transition hover:border-blue-500/60 hover:bg-[#13203a]"
               >
                 <div className="flex items-center justify-between gap-3">
