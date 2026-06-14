@@ -74,11 +74,16 @@ CORE_LABELS = {"overview", "statistics"}
 COLD_CORE = 150      # 코어 MISS>150 = 진짜 갭(핫셋이 콜드면 안 됨)
 COLD_TAIL = 500      # long-tail MISS>500 = 진짜 갭. 150~500 = colo cold-read(정상, CF 구조)
 def cold_thr(label, path=""):
-    # 코어라도 과거월(기준월 네비)은 CDN evict→KV colo cold-read 가능 → long-tail 임계 적용.
-    # 당월 코어(랜딩/기본뷰)만 엄격(CDN 상주 기대).
-    if label in CORE_LABELS and f"yyyymm={CUR_YM}" in path:
-        return COLD_CORE
-    return COLD_TAIL
+    # 진짜 "코어" = 당월 + 랜딩/기본뷰(전국 all / 서울 seoul). 이것만 CDN 상주 기대(엄격 150).
+    # 시도별 statistics(경북/전북 등)는 drill-down 준-long-tail → CDN evict 시 KV colo cold-read 허용.
+    # 과거월 코어도 long-tail 취급.
+    if label not in CORE_LABELS:
+        return COLD_TAIL
+    if f"yyyymm={CUR_YM}" not in path:
+        return COLD_TAIL  # 과거월
+    if "scope=all" in path or "scope=seoul" in path:
+        return COLD_CORE  # 당월 + 전국/서울 = 진짜 코어
+    return COLD_TAIL      # 당월이지만 시도별 = 준-long-tail
 HOST_CORE = "land.zihado.com"   # 코어: 사용자 경로(Vercel CDN) 측정
 HOST_TAIL = "api.zihado.com"    # long-tail: 워커 직결(KV) 측정 — 프록시로 재면 CDN 오염→코어 evict
 def run(n=8):
