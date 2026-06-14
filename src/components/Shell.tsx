@@ -6,14 +6,12 @@ import { usePathname } from "next/navigation";
 
 export type NavItem = { href: string; label: string; locked?: boolean };
 
+// 사이드바는 최상위 목적지 2개만. 통계·지도·분양권·전월세·단지검색은 대시보드 자체
+// 탭(매매/분양권/전월세)·뷰토글(카드/지도/통계)·⌘K 검색과 중복이라 제거.
+// (해당 페이지 라우트는 유지 — 공유 가능한 URL 로 직접 접근 가능)
 const NAV_ITEMS: NavItem[] = [
   { href: "/", label: "대시보드" },
   { href: "/today", label: "오늘의 실거래" },
-  { href: "/complex", label: "단지 검색" },
-  { href: "/stats", label: "통계" },
-  { href: "/map", label: "지도" },
-  { href: "/presale", label: "분양권" },
-  { href: "/rent", label: "전월세" },
 ];
 
 function isActive(pathname: string, href: string): boolean {
