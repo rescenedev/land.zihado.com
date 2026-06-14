@@ -28,11 +28,6 @@ const SIDO_TABS = [
   "세종", "강원", "충북", "충남", "전북", "전남", "경북", "경남", "제주",
 ];
 
-const TABS = [
-  { key: "aptTrade", label: "매매" },
-  { key: "silvTrade", label: "분양권" },
-  { key: "aptRent", label: "전월세" },
-];
 
 export default function HomeClient({
   initialData,
@@ -48,7 +43,7 @@ export default function HomeClient({
   initialPaletteOpen?: boolean;
 }) {
   const [yyyymm, setYyyymm] = useState(() => ymdOf(new Date()));
-  const [dataset, setDataset] = useState(initialDataset);
+  const [dataset] = useState(initialDataset);
   const [scope, setScope] = useState<Scope>("all");
   const [view, setView] = useState<View>(initialView);
   // 서버 SSR 초기 overview(당월·전국·매매)로 seed → 첫 페인트에 KPI·카드 즉시(빈 껍데기 방지)
@@ -441,27 +436,6 @@ export default function HomeClient({
               기준월 {yyyymm.slice(0, 4)}.{yyyymm.slice(4, 6)}
             </span>
           </div>
-        </div>
-
-        {/* 탭 (매매/분양권/전월세) */}
-        <div className="mb-5 flex gap-1 border-b border-slate-800">
-          {TABS.map((t) => (
-            <button
-              key={t.key}
-              onClick={() => setDataset(t.key)}
-              onMouseEnter={() => {
-                if (t.key !== dataset)
-                  fetchOverview(yyyymm, scope, t.key).catch(() => {});
-              }}
-              className={`px-4 py-2 text-sm font-medium transition ${
-                dataset === t.key
-                  ? "border-b-2 border-blue-500 text-blue-400"
-                  : "text-slate-500 hover:text-slate-300"
-              }`}
-            >
-              {t.label}
-            </button>
-          ))}
         </div>
 
         {/* 컨트롤 바: [월] [시도칩 2줄 wrap·중앙] [뷰토글] */}
