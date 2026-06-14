@@ -696,12 +696,13 @@ app.post("/api/admin/backfill", async (c) => {
 // 캐시 워밍 즉시 트리거 (cron 안 기다리고 Vercel+CF 전부 데움)
 app.post("/api/admin/warm", async (c) => {
   const which = c.req.query("which"); // core | recent-sido | regions | regions-past | complexes | (기본 전부)
+  // 각 which 는 단일 invocation(≤1000 subrequest) — 데이터셋을 cron 과 동일하게 분할.
   c.executionCtx.waitUntil(
     which === "core" ? warmCore()
-      : which === "recent-sido" ? warmRecentSido(enabledDatasets().map((d) => d.key))
-      : which === "regions" ? warmRegions()
-      : which === "regions-past" ? warmRegionsPast()
-      : which === "complexes" ? warmComplexes(c.env)
+      : which === "recent-sido" ? (async () => { await warmRecentSido(["aptTrade"]); await warmRecentSido(["aptRent", "silvTrade"], 7); })()
+      : which === "regions" ? warmRegions(["aptTrade", "aptRent"])
+      : which === "regions-past" ? (async () => { await warmRegionsPast(["aptTrade"]); await warmRegions(["silvTrade"]); })()
+      : which === "complexes" ? enqueueComplexWarm(c.env)
       : warmCaches(c.env)
   );
   return c.json({ ok: true, started: true, which: which ?? "all" });
@@ -810,29 +811,37 @@ async function warmRecentSido(dsets: string[], days = RECENT_WARM_DAYS): Promise
   await warmPaths(paths, WORKER_BASE); // long-tail → 워커 KV 만(CDN 코어 evict 방지). ds당 496 요청
 }
 
-// cron B (지역-당월): 거래목록 + 단지지도 + 12개월 추이 + 단지목록. 128 × 4 = ~512 요청.
-// 추이(range)는 RegionDetail 이 부르는 고정 범위(최근 12개월)와 정확히 일치시킴.
-async function warmRegions(): Promise<void> {
+// cron B (지역-당월): 지역상세가 부르는 거래목록(transactions)+12개월 추이(range)를 전 데이터셋
+// 워밍. 지도(aptmap)·단지목록(complexes)은 무겁고 aptTrade 위주라 aptTrade 만.
+// ⚠️ subrequest 1000/invocation 한도 → 데이터셋을 cron 별로 분할(scheduled 참고).
+async function warmRegions(datasets: string[] = ["aptTrade"]): Promise<void> {
   const curM = curYmd();
   const from = shiftYmd(curM, -11); // fetchTrend(sggCd, shiftMonth(yyyymm,-11), yyyymm)
   const paths: string[] = [];
-  for (const cd of SGG_CODES) {
-    paths.push(`/api/transactions?dataset=aptTrade&region=${cd}&yyyymm=${curM}`);
-    paths.push(`/api/aptmap?dataset=aptTrade&region=${cd}&yyyymm=${curM}&limit=500`); // 프론트 fetchAptMap 과 동일 키
-    paths.push(`/api/transactions/range?dataset=aptTrade&region=${cd}&from=${from}&to=${curM}`);
-    paths.push(`/api/complexes?dataset=aptTrade&region=${cd}`);
+  for (const ds of datasets) {
+    for (const cd of SGG_CODES) {
+      paths.push(`/api/transactions?dataset=${ds}&region=${cd}&yyyymm=${curM}`);
+      paths.push(`/api/transactions/range?dataset=${ds}&region=${cd}&from=${from}&to=${curM}`);
+      if (ds === "aptTrade") {
+        paths.push(`/api/aptmap?dataset=${ds}&region=${cd}&yyyymm=${curM}&limit=500`); // 프론트 fetchAptMap 과 동일 키
+        paths.push(`/api/complexes?dataset=${ds}&region=${cd}`);
+      }
+    }
   }
   await warmPaths(paths, WORKER_BASE); // 지역상세 long-tail → 워커 KV 만
 }
 
-// cron D (지역-과거월): 거래목록 + 단지지도 × 과거 2개월(기준월 네비). 128 × 2 × 2 = ~512 요청.
-async function warmRegionsPast(): Promise<void> {
+// cron D (지역-과거월): 거래목록 × 과거 2개월(기준월 네비). 지도는 aptTrade 만.
+async function warmRegionsPast(datasets: string[] = ["aptTrade"]): Promise<void> {
   const past = recentMonths(3).slice(0, 2); // 당월 제외 과거 2개월
   const paths: string[] = [];
-  for (const ym of past) {
-    for (const cd of SGG_CODES) {
-      paths.push(`/api/transactions?dataset=aptTrade&region=${cd}&yyyymm=${ym}`);
-      paths.push(`/api/aptmap?dataset=aptTrade&region=${cd}&yyyymm=${ym}&limit=500`); // 프론트 fetchAptMap 과 동일 키
+  for (const ds of datasets) {
+    for (const ym of past) {
+      for (const cd of SGG_CODES) {
+        paths.push(`/api/transactions?dataset=${ds}&region=${cd}&yyyymm=${ym}`);
+        if (ds === "aptTrade")
+          paths.push(`/api/aptmap?dataset=${ds}&region=${cd}&yyyymm=${ym}&limit=500`); // 프론트 fetchAptMap 과 동일 키
+      }
     }
   }
   await warmPaths(paths, WORKER_BASE); // 지역상세 과거월 long-tail → 워커 KV 만
@@ -887,12 +896,15 @@ function buildBackfillJobs(months: number): BackfillJob[] {
 // 당월 거래 단지 전부를 단지모달 KV 워밍 작업으로 큐 적재 (큐가 분산 처리 → subrequest 한도 회피).
 async function enqueueComplexWarm(env: Env): Promise<void> {
   const curM = curYmd();
-  const { results } = await env.DB.prepare(
-    `SELECT DISTINCT sgg_cd, apt_name FROM transactions WHERE dataset='aptTrade' AND deal_ymd=?`
-  ).bind(curM).all();
-  const jobs = (results as { sgg_cd: string; apt_name: string }[]).map(
-    (r) => ({ type: "warmcomplex", sggCd: r.sgg_cd, apt: r.apt_name, dataset: "aptTrade", dealYmd: curM } as BackfillJob)
-  );
+  // 큐 기반(subrequest 한도 무관) → 전 데이터셋 당월 거래 단지를 모두 워밍 대상으로.
+  const jobs: BackfillJob[] = [];
+  for (const d of enabledDatasets()) {
+    const { results } = await env.DB.prepare(
+      `SELECT DISTINCT sgg_cd, apt_name FROM transactions WHERE dataset=? AND deal_ymd=?`
+    ).bind(d.key, curM).all();
+    for (const r of results as { sgg_cd: string; apt_name: string }[])
+      jobs.push({ type: "warmcomplex", sggCd: r.sgg_cd, apt: r.apt_name, dataset: d.key, dealYmd: curM } as BackfillJob);
+  }
   await enqueue(env, jobs);
 }
 
@@ -935,11 +947,18 @@ export default {
   // 참고: aptRent/silvTrade 시도탭은 트래픽 적어 cron 제외(warmCore 가 전국/서울은 커버, SWR 7일).
   async scheduled(event: ScheduledController, env: Env, ctx: ExecutionContext) {
     if (event.cron === "32 0 * * *") {
-      ctx.waitUntil(warmRecentSido(["aptTrade"]));
+      // 오늘의실거래 시도탭: 매매 31일 + 전월세·분양권 7일 (한도 내, 720req)
+      ctx.waitUntil((async () => {
+        await warmRecentSido(["aptTrade"]);
+        await warmRecentSido(["aptRent", "silvTrade"], 7);
+      })());
     } else if (event.cron === "34 0 * * *") {
-      ctx.waitUntil(warmRegions());        // 지역상세 당월
+      ctx.waitUntil(warmRegions(["aptTrade", "aptRent"])); // 당월: 매매 full + 전월세 tx/range
     } else if (event.cron === "36 0 * * *") {
-      ctx.waitUntil(warmRegionsPast());    // 지역상세 과거 2개월(기준월 네비)
+      ctx.waitUntil((async () => {
+        await warmRegionsPast(["aptTrade"]); // 과거 2개월 매매
+        await warmRegions(["silvTrade"]);    // 당월 분양권 tx/range
+      })());
     } else if (event.cron === "42 0 * * *") {
       ctx.waitUntil(enqueueComplexWarm(env)); // 단지 상세 모달 KV 워밍(당월 단지 전부, 큐 분산)
     } else {
