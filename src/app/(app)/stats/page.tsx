@@ -2,7 +2,7 @@
 import HomeClient from "@/components/HomeClient";
 import { ssrOverview, ssrStatistics } from "@/lib/ssr";
 
-export const revalidate = 120;
+export const revalidate = 1800; // 일1회 데이터 → 30분 (cron 워밍이 재생성 흡수, PRERENDER 콜드 꼬리 15배↓)
 export const metadata = { title: "통계 · 실거래 대시보드" };
 
 export default async function Page() {

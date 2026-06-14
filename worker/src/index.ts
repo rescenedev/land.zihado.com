@@ -755,6 +755,16 @@ async function warmCore(): Promise<void> {
   // ⚠️ 프록시 고동시성 워밍은 KV 쓰기(waitUntil)를 드롭함 → KV 는 워커직결로 별도 워밍.
   await warmPaths(paths, WORKER_BASE);
   await warmPaths(paths);
+  // SSR HTML 라우트(ISR)는 위 API 데이터가 데워진 뒤 마지막에 재생성 → 콜드 PRERENDER
+  // 꼬리를 실사용자가 아닌 cron 이 흡수. revalidate(1800s)와 일1회 cron 으로 거의 항상 HIT.
+  await warmSsrPages();
+}
+
+// SSR HTML 라우트(Vercel ISR 전용 — 워커는 HTML 미서빙). 데이터 워밍 직후 호출해야
+// 페이지 재생성이 신선한 KV 를 끌어온다. src/app/(app)/*/page.tsx 라우트와 1:1.
+const SSR_PAGES = ["/", "/today", "/stats", "/rent", "/presale", "/map", "/complex"];
+async function warmSsrPages(): Promise<void> {
+  await warmPaths(SSR_PAGES); // VERCEL_BASE 기본
 }
 
 // 오늘의실거래 시도탭: recent 시도 × 최근 N일. 데이터셋별로 cron 분할 호출해

@@ -23,7 +23,7 @@ export async function ssrOverview(
   try {
     const r = await fetch(
       `${WORKER}/api/overview?dataset=${dataset}&scope=${scope}&yyyymm=${kstYmd()}`,
-      { next: { revalidate: 120 } }
+      { next: { revalidate: 1800 } }
     );
     if (!r.ok) return null;
     return (await r.json()) as OverviewResponse;
@@ -39,7 +39,7 @@ export async function ssrStatistics(
   try {
     const r = await fetch(
       `${WORKER}/api/statistics?dataset=${dataset}&scope=${scope}&yyyymm=${kstYmd()}`,
-      { next: { revalidate: 120 } }
+      { next: { revalidate: 1800 } }
     );
     if (!r.ok) return null;
     return (await r.json()) as Statistics;
@@ -56,7 +56,7 @@ export async function ssrTodayDeals(
     const date = kstDate();
     const r = await fetch(
       `${WORKER}/api/recent?dataset=${dataset}&scope=${scope}&yyyymm=${kstYmd()}&limit=300&date=${date}`,
-      { next: { revalidate: 120 } }
+      { next: { revalidate: 1800 } }
     );
     if (!r.ok) return null;
     const d = (await r.json()) as { deals?: Transaction[] };
