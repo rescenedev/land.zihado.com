@@ -62,6 +62,18 @@ export default function HomeClient({
   const [focusGu, setFocusGu] = useState<string | null>(null);
   const [mapDetail, setMapDetail] = useState<{ sggCd: string; title: string } | null>(null);
   const pollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const curYm = ymdOf(new Date());
+  const navedRef = useRef(false);      // 사용자가 직접 월 네비하면 자동 점프 중단
+  const fallbackRef = useRef(0);       // 빈 월 자동 뒤로 탐색 횟수(무한루프 방지)
+
+  // 기준월 이동(‹ › 버튼·키보드 공용). 미래월은 데이터 없으니 차단.
+  const stepMonth = useCallback((delta: number) => {
+    navedRef.current = true; // 수동 이동 → 빈 월 자동 점프 비활성
+    setYyyymm((m) => {
+      const next = shiftMonth(m, delta);
+      return next > curYm ? m : next;
+    });
+  }, [curYm]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -69,6 +81,13 @@ export default function HomeClient({
     try {
       const res = await fetchOverview(yyyymm, scope, dataset);
       setData(res);
+      // 실거래 없는 월(당월 미신고 등) → 가장 최근 실거래 있는 월로 자동 점프(최대 6개월).
+      // 사용자가 직접 네비한 뒤에는 빈 월도 그대로 보여줌(navedRef).
+      if (!navedRef.current && res.totals.count === 0 && fallbackRef.current < 6) {
+        fallbackRef.current += 1;
+        setYyyymm((m) => shiftMonth(m, -1));
+        return;
+      }
       if (res.totals.loaded < res.totals.regions) {
         pollRef.current = setTimeout(load, 2500);
       }
@@ -85,6 +104,20 @@ export default function HomeClient({
       if (pollRef.current) clearTimeout(pollRef.current);
     };
   }, [load]);
+
+  // 키보드 ← → 로 기준월 이동(‹ › 버튼과 동일). 입력 중·브라우저 단축키(⌘←)·오버레이 열림 시 무시.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      if (paletteOpen || detail || complex || mapDetail) return; // 모달/팔레트 열림 → 월 이동 막음
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
+      if (e.key === "ArrowLeft") { e.preventDefault(); stepMonth(-1); }
+      else if (e.key === "ArrowRight") { e.preventDefault(); stepMonth(1); }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [stepMonth, paletteOpen, detail, complex, mapDetail]);
 
   // 전국(all) 표시 중에는 별도 scope인 '서울' 데이터를 백그라운드로 미리 읽어둠
   // → 서울 칩 클릭 시 네트워크 0(즉시). 전국 데이터엔 나머지 시도가 모두 포함됨.
@@ -433,11 +466,11 @@ export default function HomeClient({
               <kbd className="rounded bg-slate-700 px-1.5 py-0.5 text-[10px] text-slate-300">⌘K</kbd>
             </button>
             <div className="flex items-center gap-0.5 rounded-lg border border-slate-700 bg-slate-800/40 px-1 py-0.5">
-              <NavBtn onClick={() => setYyyymm((m) => shiftMonth(m, -1))}>‹</NavBtn>
-              <span className="px-1 text-xs font-semibold text-slate-200">
+              <NavBtn onClick={() => stepMonth(-1)}>‹</NavBtn>
+              <span className="px-1 text-xs font-semibold text-slate-200" title="← → 키로 이동">
                 기준월 {yyyymm.slice(0, 4)}.{yyyymm.slice(4, 6)}
               </span>
-              <NavBtn onClick={() => setYyyymm((m) => shiftMonth(m, 1))}>›</NavBtn>
+              <NavBtn onClick={() => stepMonth(1)} disabled={yyyymm >= curYm}>›</NavBtn>
             </div>
           </div>
         </div>
@@ -741,11 +774,12 @@ function MoMChip({ prev, cur }: { prev?: number; cur?: number }) {
   );
 }
 
-function NavBtn({ children, onClick }: { children: React.ReactNode; onClick: () => void }) {
+function NavBtn({ children, onClick, disabled }: { children: React.ReactNode; onClick: () => void; disabled?: boolean }) {
   return (
     <button
       onClick={onClick}
-      className="h-7 w-7 rounded text-slate-400 hover:bg-slate-700/50 hover:text-white"
+      disabled={disabled}
+      className="h-7 w-7 rounded text-slate-400 enabled:hover:bg-slate-700/50 enabled:hover:text-white disabled:cursor-not-allowed disabled:opacity-30"
     >
       {children}
     </button>
