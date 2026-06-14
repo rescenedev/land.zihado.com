@@ -74,6 +74,7 @@ export function TodayDeals({
 }) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
+  const [busy, setBusy] = useState(false); // 지연 로딩 플래그(빠른 전환엔 깜빡임 방지)
   const [selected, setSelected] = useState<{ region: string; apt: string; umdNm?: string; jibun?: string } | null>(null);
 
   const today = todayStr();
@@ -109,6 +110,13 @@ export function TodayDeals({
     return () => window.removeEventListener("keydown", onKey);
   }, [date, sido, dataset, today, isToday, isFuture]);
 
+  // 전환이 200ms 넘게 걸릴 때만 로딩 표시 → 프리페치/빈 날짜 빠른 전환엔 깜빡임 없음
+  useEffect(() => {
+    if (!isPending) { setBusy(false); return; }
+    const t = setTimeout(() => setBusy(true), 200);
+    return () => clearTimeout(t);
+  }, [isPending]);
+
   // 가격순 정렬 + 게임화 뱃지 계산
   const { sorted, topRiserId, longestGapId } = useMemo(() => {
     const s = [...deals].sort((a, b) => (b.dealAmount || b.deposit) - (a.dealAmount || a.deposit));
@@ -141,16 +149,19 @@ export function TodayDeals({
           <h1 className="text-2xl font-bold tracking-tight text-white">오늘의 실거래</h1>
           <p className="mt-1 text-sm text-slate-400">계약일 기준 · {date} 신고 거래</p>
         </div>
-        <div className="flex items-center gap-2">
-          <div className="flex items-center gap-1 rounded-lg border border-slate-700 bg-slate-800/40 p-1">
-            <button onClick={() => go(shiftDate(date, -1), sido, dataset)} className="flex h-8 w-8 items-center justify-center rounded-md text-slate-300 hover:bg-slate-700" aria-label="이전 날짜">‹</button>
-            <label className="relative flex min-w-[150px] cursor-pointer items-center justify-center px-2 text-sm font-semibold text-slate-100">
-              {date} ({dowOf(date)})
-              <input type="date" value={date} max={today} onChange={(e) => e.target.value && go(e.target.value, sido, dataset)} className="absolute inset-0 cursor-pointer opacity-0" />
-            </label>
-            <button onClick={() => go(shiftDate(date, 1), sido, dataset)} disabled={isFuture || isToday} className="flex h-8 w-8 items-center justify-center rounded-md text-slate-300 hover:bg-slate-700 disabled:opacity-30 disabled:hover:bg-transparent" aria-label="다음 날짜">›</button>
+        <div className="flex flex-col items-end gap-1.5">
+          <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1 rounded-lg border border-slate-700 bg-slate-800/40 p-1">
+              <button onClick={() => go(shiftDate(date, -1), sido, dataset)} className="flex h-8 w-8 items-center justify-center rounded-md text-slate-300 hover:bg-slate-700" aria-label="이전 날짜">‹</button>
+              <label className="relative flex min-w-[150px] cursor-pointer items-center justify-center px-2 text-sm font-semibold text-slate-100">
+                {date} ({dowOf(date)})
+                <input type="date" value={date} max={today} onChange={(e) => e.target.value && go(e.target.value, sido, dataset)} className="absolute inset-0 cursor-pointer opacity-0" />
+              </label>
+              <button onClick={() => go(shiftDate(date, 1), sido, dataset)} disabled={isFuture || isToday} className="flex h-8 w-8 items-center justify-center rounded-md text-slate-300 hover:bg-slate-700 disabled:opacity-30 disabled:hover:bg-transparent" aria-label="다음 날짜">›</button>
+            </div>
+            <button onClick={() => go(today, sido, dataset)} disabled={isToday} className="rounded-lg border border-slate-700 px-3 py-1.5 text-sm text-slate-300 hover:bg-slate-800 disabled:opacity-40">오늘</button>
           </div>
-          <button onClick={() => go(today, sido, dataset)} disabled={isToday} className="rounded-lg border border-slate-700 px-3 py-1.5 text-sm text-slate-300 hover:bg-slate-800 disabled:opacity-40">오늘</button>
+          <p className="pr-1 text-[11px] text-slate-600">키보드 ← → 로 쉽게 날짜를 바꾸세요</p>
         </div>
       </div>
 
@@ -181,15 +192,15 @@ export function TodayDeals({
       {sorted.length > 0 && <TodayCharts deals={sorted} />}
 
       <div className="mb-3 text-sm font-medium text-slate-300">
-        {isPending ? "불러오는 중…" : `${sorted.length}건`}
-        {!isPending && sorted.length === 0 && <span className="ml-1 text-slate-500">· 이 날짜 신고된 거래가 없습니다</span>}
+        {busy ? "불러오는 중…" : `${sorted.length}건`}
+        {!busy && sorted.length === 0 && <span className="ml-1 text-slate-500">· 이 날짜 신고된 거래가 없습니다</span>}
       </div>
 
       {/* 전환 중에는 직전 데이터를 흐리게 유지(스켈레톤 깜빡임 없이). 데이터 없으면 안내. */}
-      {sorted.length === 0 && !isPending ? (
+      {sorted.length === 0 && !busy ? (
         <div className="py-16 text-center text-slate-500">{isFuture ? "아직 오지 않은 날짜입니다." : "‹ › 로 다른 날짜를 확인해보세요."}</div>
       ) : (
-        <div className={`grid grid-cols-1 gap-2 transition-opacity sm:grid-cols-2 xl:grid-cols-3 ${isPending ? "opacity-50" : ""}`}>
+        <div className={`grid grid-cols-1 gap-2 transition-opacity sm:grid-cols-2 xl:grid-cols-3 ${busy ? "opacity-50" : ""}`}>
           {sorted.map((tx, i) => {
             const id = `${tx.id ?? ""}-${tx.aptName}`;
             const badges: { t: string; cls: string }[] = [];
