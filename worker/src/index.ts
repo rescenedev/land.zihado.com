@@ -230,9 +230,8 @@ app.get("/api/overview", async (c) => {
   const ovTtl = totals.loaded >= totals.regions
     ? (yyyymm >= curYmd() ? 60 * 60 * 25 : 60 * 60 * 24 * 7)
     : 60;
-  c.executionCtx.waitUntil(
-    c.env.CACHE.put(ovKey, JSON.stringify(payload), { expirationTtl: ovTtl })
-  );
+  // await (waitUntil 아님): 워밍 시 KV 쓰기 확실히 완료 → 코어 KV 바닥 보장
+  await c.env.CACHE.put(ovKey, JSON.stringify(payload), { expirationTtl: ovTtl });
 
   return c.json(payload, 200, { "Cache-Control": "public, max-age=60" });
 });
@@ -274,13 +273,13 @@ app.get("/api/statistics", async (c) => {
   const loaded = codes.filter((cd) => have.has(cd)).length;
   const stats = await computeStatsSql(c.env, dataset, yyyymm, scope, REGION_NAMES);
 
-  // loaded/total 을 payload 에 포함해 캐시 → KV 히트 시 D1 재조회 불필요
-  c.executionCtx.waitUntil(
-    c.env.CACHE.put(
-      statsKey,
-      JSON.stringify({ _loaded: loaded, _total: codes.length, ...stats }),
-      { expirationTtl: respTtl(yyyymm) }
-    )
+  // loaded/total 을 payload 에 포함해 캐시 → KV 히트 시 D1 재조회 불필요.
+  // ⚠️ await (waitUntil 아님): 고/저동시성 워밍에서도 KV 쓰기가 확실히 완료돼 바닥 보장
+  //    (waitUntil 은 isolate 재활용 시 드롭 → KV 비어 매번 재집계됨, 실측).
+  await c.env.CACHE.put(
+    statsKey,
+    JSON.stringify({ _loaded: loaded, _total: codes.length, ...stats }),
+    { expirationTtl: respTtl(yyyymm) }
   );
 
   const cc = loaded >= codes.length ? "public, max-age=1800" : "public, max-age=600";
