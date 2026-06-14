@@ -12,27 +12,15 @@ import {
 } from "@/lib/api";
 import { formatEok } from "@/lib/format";
 import { centroidFor, SGG_CENTROIDS, SIDO_CENTROIDS } from "@/lib/geo";
-import { Shell, type NavItem } from "@/components/Shell";
 import { RegionCard, type CardData } from "@/components/RegionCard";
 import { RegionDetail } from "@/components/RegionDetail";
 import { KakaoMap, type MapItem } from "@/components/KakaoMap";
 import { StatsView } from "@/components/StatsView";
 import { CommandPalette } from "@/components/CommandPalette";
 import { ComplexDetail } from "@/components/ComplexDetail";
-import { TodayDeals } from "@/components/TodayDeals";
 
 type Scope = "seoul" | "all";
 type View = "cards" | "map" | "stats";
-
-const NAV: NavItem[] = [
-  { key: "dashboard", label: "대시보드" },
-  { key: "today", label: "오늘의 실거래" },
-  { key: "complex", label: "단지 검색" },
-  { key: "stats", label: "통계" },
-  { key: "map", label: "지도" },
-  { key: "presale", label: "분양권" },
-  { key: "rent", label: "전월세" },
-];
 
 const SIDO_TABS = [
   "전국", "서울", "경기", "인천", "부산", "대구", "광주", "대전", "울산",
@@ -45,12 +33,21 @@ const TABS = [
   { key: "aptRent", label: "전월세" },
 ];
 
-export default function HomeClient({ initialData }: { initialData?: OverviewResponse | null }) {
+export default function HomeClient({
+  initialData,
+  initialDataset = "aptTrade",
+  initialView = "cards",
+  initialPaletteOpen = false,
+}: {
+  initialData?: OverviewResponse | null;
+  initialDataset?: string;
+  initialView?: View;
+  initialPaletteOpen?: boolean;
+}) {
   const [yyyymm, setYyyymm] = useState(() => ymdOf(new Date()));
-  const [dataset, setDataset] = useState("aptTrade");
+  const [dataset, setDataset] = useState(initialDataset);
   const [scope, setScope] = useState<Scope>("all");
-  const [view, setView] = useState<View>("cards");
-  const [nav, setNav] = useState("dashboard");
+  const [view, setView] = useState<View>(initialView);
   // 서버 SSR 초기 overview(당월·전국·매매)로 seed → 첫 페인트에 KPI·카드 즉시(빈 껍데기 방지)
   const [data, setData] = useState<OverviewResponse | null>(initialData ?? null);
   const [allTotals, setAllTotals] = useState<OverviewResponse["totals"] | null>(null);
@@ -60,7 +57,7 @@ export default function HomeClient({ initialData }: { initialData?: OverviewResp
   const [error, setError] = useState("");
   const [selectedSido, setSelectedSido] = useState<string | null>(null);
   const [detail, setDetail] = useState<{ sggCd: string; title: string } | null>(null);
-  const [paletteOpen, setPaletteOpen] = useState(false);
+  const [paletteOpen, setPaletteOpen] = useState(initialPaletteOpen);
   const [complex, setComplex] = useState<{ region: string; apt: string } | null>(null);
   const [aptItems, setAptItems] = useState<MapItem[] | null>(null);
   const [aptFocus, setAptFocus] = useState<string | null>(null);
@@ -377,27 +374,6 @@ export default function HomeClient({ initialData }: { initialData?: OverviewResp
     setMapDetail({ sggCd: key, title: name });
   }, []);
 
-  // 좌측 사이드바 네비게이션
-  const onNav = useCallback((key: string) => {
-    if (key === "complex") {
-      setPaletteOpen(true);
-      return;
-    }
-    if (key === "today") {
-      setNav("today");
-      return;
-    }
-    // 나머지는 대시보드 본문 내 보기/데이터셋 전환
-    setNav(key);
-    setDetail(null);
-    if (key === "stats") setView("stats");
-    else if (key === "map") setView("map");
-    else setView("cards");
-    if (key === "rent") setDataset("aptRent");
-    else if (key === "presale") setDataset("silvTrade");
-    else if (key === "dashboard") setDataset("aptTrade");
-  }, []);
-
   // 시도 칩 선택: 전국/서울/그 외 시도
   const selectSido = useCallback((sd: string) => {
     if (sd === "전국") {
@@ -422,34 +398,8 @@ export default function HomeClient({ initialData }: { initialData?: OverviewResp
     if (aptFocusRef.current) setComplex({ region: aptFocusRef.current, apt });
   }, []);
 
-  if (nav === "today") {
-    return (
-      <Shell nav={NAV} activeKey={nav} onNav={onNav}>
-        <TodayDeals />
-        <CommandPalette
-          open={paletteOpen}
-          onClose={() => setPaletteOpen(false)}
-          onSelectRegion={(sggCd, name) => {
-            setNav("dashboard");
-            setDetail({ sggCd, title: name });
-          }}
-          onSelectComplex={(region, apt) => setComplex({ region, apt })}
-        />
-        {complex && (
-          <ComplexDetail
-            region={complex.region}
-            apt={complex.apt}
-            yyyymm={yyyymm}
-            dataset={dataset}
-            onClose={() => setComplex(null)}
-          />
-        )}
-      </Shell>
-    );
-  }
-
   return (
-    <Shell nav={NAV} activeKey={nav} onNav={onNav}>
+    <>
       <div className="mx-auto w-[92%] max-w-[1800px] px-2 py-7">
         {/* 헤더 */}
         <div className="mb-1 text-xs font-semibold text-blue-400">
@@ -730,7 +680,7 @@ export default function HomeClient({ initialData }: { initialData?: OverviewResp
           onClose={() => setComplex(null)}
         />
       )}
-    </Shell>
+    </>
   );
 }
 

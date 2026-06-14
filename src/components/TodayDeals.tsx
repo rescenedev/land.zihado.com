@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { fetchRecent, type Transaction } from "@/lib/api";
 import { formatDeal, pyeong } from "@/lib/format";
 import { ALL_DISTRICTS } from "@/lib/regions";
@@ -48,19 +48,26 @@ function dowOf(date: string): string {
 const regionName = (sggCd: string) =>
   ALL_DISTRICTS.find((d) => d.code === sggCd)?.name ?? sggCd;
 
-export function TodayDeals() {
+export function TodayDeals({ initialDeals }: { initialDeals?: Transaction[] | null }) {
   const [dataset, setDataset] = useState("aptTrade");
   const [sido, setSido] = useState("전국");
   const [date, setDate] = useState(todayStr());
-  const [deals, setDeals] = useState<Transaction[]>([]);
-  const [loading, setLoading] = useState(true);
+  // 서버 SSR 초기 거래(오늘·전국·매매)로 seed → 첫 페인트에 즉시(스켈레톤 제거)
+  const [deals, setDeals] = useState<Transaction[]>(initialDeals ?? []);
+  const [loading, setLoading] = useState(!initialDeals);
   const [selected, setSelected] = useState<{ region: string; apt: string; umdNm?: string; jibun?: string } | null>(null);
+  // SSR seed 가 있으면 첫 effect 의 재fetch 스킵(데이터 이미 신선·ISR). 이후 파라미터 변경만 fetch.
+  const seeded = useRef(!!initialDeals);
 
   const today = todayStr();
   const isToday = date === today;
   const isFuture = date > today;
 
   useEffect(() => {
+    if (seeded.current) {
+      seeded.current = false;
+      return;
+    }
     let alive = true;
     setLoading(true);
     fetchRecent(ymdOfDate(date), scopeOf(sido), dataset, 300, date)
@@ -169,7 +176,7 @@ export function TodayDeals() {
             return (
               <button
                 key={`${id}-${i}`}
-                onClick={() => setSelected({ region: tx.sggCd ?? "", apt: tx.aptName })}
+                onClick={() => setSelected({ region: tx.sggCd ?? "", apt: tx.aptName, umdNm: tx.umdNm, jibun: tx.jibun })}
                 className="flex flex-col gap-1.5 rounded-xl border border-slate-800 bg-[#111a2e] px-4 py-3 text-left transition hover:border-blue-500/60 hover:bg-[#13203a]"
               >
                 <div className="flex items-center justify-between gap-3">
@@ -217,7 +224,7 @@ export function TodayDeals() {
       )}
 
       {selected && (
-        <ComplexDetail region={selected.region} apt={selected.apt} yyyymm={ymdOfDate(date)} dataset={dataset} onClose={() => setSelected(null)} />
+        <ComplexDetail region={selected.region} apt={selected.apt} umdNm={selected.umdNm} jibun={selected.jibun} yyyymm={ymdOfDate(date)} dataset={dataset} onClose={() => setSelected(null)} />
       )}
     </div>
   );
