@@ -387,6 +387,28 @@ export async function upsertRegionAgg(
   ).bind(dataset, dealYmd, sggCd, a.count, a.avg, a.avg84, a.max, a.min).run();
 }
 
+// (dataset, deal_ymd) 의 region_month_agg 를 transactions 원본에서 전 지역 한 번에 재구축.
+// 과거 적재분이 agg 누락된 경우(ensureMonth d1분기가 agg 미갱신했던 버그) 일괄 복구용.
+// amt/avg84 정의는 aggregateMonth 와 동일(amt = deal_amount>0 ? deal_amount : deposit, 84㎡=80~86).
+export async function rebuildAgg(env: Env, dataset: string, dealYmd: string): Promise<number> {
+  await env.DB.prepare(
+    `INSERT INTO region_month_agg (dataset, deal_ymd, sgg_cd, count, avg, avg84, max, min)
+     SELECT dataset, deal_ymd, sgg_cd,
+       COUNT(*),
+       CAST(AVG(CASE WHEN deal_amount>0 THEN deal_amount ELSE deposit END) AS INTEGER),
+       CAST(COALESCE(AVG(CASE WHEN area>=80 AND area<=86 THEN (CASE WHEN deal_amount>0 THEN deal_amount ELSE deposit END) END),0) AS INTEGER),
+       MAX(CASE WHEN deal_amount>0 THEN deal_amount ELSE deposit END),
+       MIN(CASE WHEN deal_amount>0 THEN deal_amount ELSE deposit END)
+     FROM transactions WHERE dataset=? AND deal_ymd=? GROUP BY dataset, deal_ymd, sgg_cd
+     ON CONFLICT(dataset, deal_ymd, sgg_cd) DO UPDATE SET
+       count=excluded.count, avg=excluded.avg, avg84=excluded.avg84, max=excluded.max, min=excluded.min`
+  ).bind(dataset, dealYmd).run();
+  const { results } = await env.DB.prepare(
+    `SELECT COUNT(*) AS n FROM region_month_agg WHERE dataset=? AND deal_ymd=?`
+  ).bind(dataset, dealYmd).all();
+  return Number((results[0] as { n?: number })?.n ?? 0);
+}
+
 // 사전집계 테이블에서 (dataset, deal_ymd)의 지역별 집계를 즉시 룩업.
 // 기존 raw GROUP BY(수십만 행)를 PK prefix 스캔(수백 행)으로 대체.
 // rentFilter 인자는 호출부에서 사용하지 않아(항상 "") 시그니처 호환용으로만 유지.

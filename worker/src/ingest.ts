@@ -31,6 +31,9 @@ export async function ensureMonth(
   if (await isIngested(env, dataset, sggCd, dealYmd)) {
     const rows = await queryMonth(env, dataset, sggCd, dealYmd);
     await putMonthKV(env, dataset, sggCd, dealYmd, rows);
+    // self-heal: 과거 적재분이 region_month_agg 를 안 채웠던 케이스(overview 0건 버그) 복구.
+    // idempotent(ON CONFLICT) 라 이미 정상인 월은 같은 값으로 덮어쓸 뿐.
+    await upsertRegionAgg(env, dataset, sggCd, dealYmd, rows);
     return { rows, source: "d1" };
   }
 

@@ -22,6 +22,7 @@ import {
   recentDeals,
   aptPriorStats,
   aptMonthlySeries,
+  rebuildAgg,
 } from "./db";
 import { cachedJson } from "./cache";
 import { geocode } from "./geocode";
@@ -179,7 +180,7 @@ app.get("/api/overview", async (c) => {
   if (!RE_YMD.test(yyyymm)) return c.json({ error: "yyyymm(YYYYMM) 필요" }, 400);
 
   const codes = scopeCodes(scope);
-  const ovKey = `resp:ov:${dataset}:${scope}:${yyyymm}`;
+  const ovKey = `resp:ov:v2:${dataset}:${scope}:${yyyymm}`; // v2: agg 복구 후 0건 캐시 무효화
 
   // KV 응답 캐시: 히트 시 ensure/집계 전부 스킵(즉시)
   const kvHit = await c.env.CACHE.get(ovKey, "json");
@@ -697,6 +698,19 @@ app.post("/api/admin/backfill", async (c) => {
   const jobs = buildBackfillJobs(months);
   await enqueue(c.env, jobs);
   return c.json({ enqueued: jobs.length, months, datasets: enabledDatasets().map((d) => d.key) });
+});
+
+// region_month_agg 재구축: transactions 원본에서 (dataset × 최근 N개월) agg 전 지역 재계산.
+// 과거 적재분 agg 누락(overview 0건) 일괄 복구. 파라미터 없으면 전 데이터셋 × 최근 12개월.
+app.post("/api/admin/rebuild-agg", async (c) => {
+  const dataset = c.req.query("dataset");
+  const yyyymm = c.req.query("yyyymm");
+  const months = yyyymm ? [yyyymm] : recentMonths(Number(c.req.query("months") ?? "12"));
+  const datasets = dataset ? [dataset] : enabledDatasets().map((d) => d.key);
+  const out: Record<string, number> = {};
+  for (const ds of datasets)
+    for (const ym of months) out[`${ds}:${ym}`] = await rebuildAgg(c.env, ds, ym);
+  return c.json({ ok: true, rebuilt: out });
 });
 
 // 캐시 워밍 즉시 트리거 (cron 안 기다리고 Vercel+CF 전부 데움)
