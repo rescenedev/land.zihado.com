@@ -89,9 +89,10 @@ export function TodayDeals({
   const go = (d: string, s: string, ds: string) =>
     startTransition(() => router.push(hrefFor(d, s, ds, today), { scroll: false }));
 
-  // 인접 날짜 프리페치 → ‹ › 즉시 전환(스켈레톤 없음)
+  // 인접 날짜 프리페치(이전 5일 + 다음 1일) → ‹ 연속 클릭도 RSC 클라 캐시 HIT(즉시 전환).
+  // prefetch 는 RSC 페이로드를 미리 받아두므로 CDN 콜드여도 사용자는 대기 안 함.
   useEffect(() => {
-    router.prefetch(hrefFor(shiftDate(date, -1), sido, dataset, today));
+    for (let i = 1; i <= 5; i++) router.prefetch(hrefFor(shiftDate(date, -i), sido, dataset, today));
     if (!isToday) router.prefetch(hrefFor(shiftDate(date, 1), sido, dataset, today));
   }, [date, sido, dataset, today, isToday, router]);
 

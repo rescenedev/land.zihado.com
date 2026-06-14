@@ -763,8 +763,27 @@ async function warmCore(): Promise<void> {
 // SSR HTML 라우트(Vercel ISR 전용 — 워커는 HTML 미서빙). 데이터 워밍 직후 호출해야
 // 페이지 재생성이 신선한 KV 를 끌어온다. src/app/(app)/*/page.tsx 라우트와 1:1.
 const SSR_PAGES = ["/", "/today", "/stats", "/rent", "/presale", "/map", "/complex"];
+
+// ⚠️ Vercel ISR 의 RSC 페이로드는 HTML 과 별도 캐시 엔트리(RSC 헤더로 vary). 날짜 클릭=soft-nav
+//    은 RSC 만 받으므로 HTML 만 구우면 RSC MISS 콜드(실측 741ms). HTML·RSC 둘 다 굽는다.
+async function warmPathsRsc(paths: string[]): Promise<void> {
+  const all = paths.map((p) => VERCEL_BASE + p);
+  const CONC = 5;
+  for (let i = 0; i < all.length; i += CONC) {
+    await Promise.allSettled(all.slice(i, i + CONC).map((u) => fetch(u, { headers: { RSC: "1" } })));
+  }
+}
+
 async function warmSsrPages(): Promise<void> {
-  await warmPaths(SSR_PAGES); // VERCEL_BASE 기본
+  // 오늘의실거래 최근 14일 날짜 경로(/today/[date], 전국·매매) — soft-nav 대상.
+  const todayDates: string[] = [];
+  for (let i = 1; i < 14; i++) {
+    const dt = shiftDays(i);
+    if (dt) todayDates.push(`/today/${dt.slice(0, 4)}-${dt.slice(4, 6)}-${dt.slice(6, 8)}`);
+  }
+  const pages = [...SSR_PAGES, ...todayDates];
+  await warmPaths(pages); // HTML 진입
+  await warmPathsRsc(pages); // RSC soft-nav (HTML 과 별도 캐시)
 }
 
 // 오늘의실거래 시도탭: recent 시도 × 최근 N일. 데이터셋별로 cron 분할 호출해
