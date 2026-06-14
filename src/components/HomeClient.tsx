@@ -9,6 +9,7 @@ import {
   ymdOf,
   type RegionRow,
   type OverviewResponse,
+  type Statistics,
 } from "@/lib/api";
 import { formatEok } from "@/lib/format";
 import { centroidFor, SGG_CENTROIDS, SIDO_CENTROIDS } from "@/lib/geo";
@@ -35,11 +36,13 @@ const TABS = [
 
 export default function HomeClient({
   initialData,
+  initialStats = null,
   initialDataset = "aptTrade",
   initialView = "cards",
   initialPaletteOpen = false,
 }: {
   initialData?: OverviewResponse | null;
+  initialStats?: Statistics | null;
   initialDataset?: string;
   initialView?: View;
   initialPaletteOpen?: boolean;
@@ -593,7 +596,7 @@ export default function HomeClient({
             onBack={() => setDetail(null)}
           />
         ) : view === "stats" ? (
-          <StatsView yyyymm={yyyymm} scope={selectedSido ?? scope} dataset={dataset} />
+          <StatsView yyyymm={yyyymm} scope={selectedSido ?? scope} dataset={dataset} initialData={initialStats} />
         ) : (
           <>
             {selectedSido && (

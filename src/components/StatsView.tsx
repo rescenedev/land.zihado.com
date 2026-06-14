@@ -8,13 +8,16 @@ export function StatsView({
   yyyymm,
   scope,
   dataset = "aptTrade",
+  initialData = null,
 }: {
   yyyymm: string;
   scope: string;
   dataset?: string;
+  initialData?: Statistics | null;
 }) {
-  const [data, setData] = useState<Statistics | null>(null);
-  const [pending, setPending] = useState(true);
+  // 서버 SSR 초기 통계(당월·전국·매매)로 seed → 첫 페인트에 차트 즉시("집계 중" 제거)
+  const [data, setData] = useState<Statistics | null>(initialData);
+  const [pending, setPending] = useState(!initialData);
   const [err, setErr] = useState("");
 
   useEffect(() => {
