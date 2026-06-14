@@ -161,7 +161,7 @@ export function TodayDeals({
             </div>
             <button onClick={() => go(today, sido, dataset)} disabled={isToday} className="rounded-lg border border-slate-700 px-3 py-1.5 text-sm text-slate-300 hover:bg-slate-800 disabled:opacity-40">오늘</button>
           </div>
-          <p className="pr-1 text-[11px] text-slate-600">키보드 ← → 로 쉽게 날짜를 바꾸세요</p>
+          <p className="pr-1 text-[11px] text-slate-600">⬅️ ➡️ 로 쉽게 날짜를 바꾸세요</p>
         </div>
       </div>
 
