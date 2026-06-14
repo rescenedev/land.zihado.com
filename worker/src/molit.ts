@@ -32,7 +32,7 @@ export type Transaction = {
   agentSgg: string;
   cdealType: string;
   cdealDay: string;
-  extra: Record<string, string>; // 데이터셋별 원본 태그 전체
+  extra?: Record<string, string>; // 데이터셋별 원본 태그 전체(D1 저장용 — API 응답엔 미포함)
 };
 
 export type Complex = {

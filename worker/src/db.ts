@@ -715,12 +715,8 @@ export async function searchComplexes(
 
 function rowToTx(r: unknown): Transaction {
   const o = r as Record<string, unknown>;
-  let extra: Record<string, string> = {};
-  try {
-    if (o.extra) extra = JSON.parse(String(o.extra));
-  } catch {
-    extra = {};
-  }
+  // 주의: o.extra(원본 MOLIT 태그)는 응답에 싣지 않는다 — 프론트 미사용, 레코드 크기 ~2배 군살.
+  // D1 에는 계속 저장(쓰기경로 유지), 읽기 응답에서만 제외.
   return {
     id: String(o.id),
     dataset: String(o.dataset ?? "aptTrade"),
@@ -745,6 +741,5 @@ function rowToTx(r: unknown): Transaction {
     agentSgg: String(o.agent_sgg ?? ""),
     cdealType: String(o.cdeal_type ?? ""),
     cdealDay: String(o.cdeal_day ?? ""),
-    extra,
   };
 }

@@ -63,12 +63,18 @@ function edgeTtl(url: string): number | null {
   return null;
 }
 
+// 응답 스키마 변경 시 bump → 기존 엣지 캐시 엔트리 자동 고아화(새 키로 슬림 응답 재캐시).
+// v2: Transaction.extra(원본 MOLIT 태그 중복) 응답 제외 — 레코드 ~2배 군살 제거.
+const CACHE_VERSION = "v2";
+
 app.use("*", async (c, next) => {
   if (c.req.method !== "GET") return next();
   const ttl = edgeTtl(c.req.url);
   if (ttl === null) return next();
   const cache = caches.default;
-  const cacheKey = new Request(c.req.url, { method: "GET" });
+  const keyUrl = new URL(c.req.url);
+  keyUrl.searchParams.set("__cv", CACHE_VERSION);
+  const cacheKey = new Request(keyUrl.toString(), { method: "GET" });
   const hit = await cache.match(cacheKey);
   if (hit) {
     c.res = new Response(hit.body, hit);
@@ -303,7 +309,7 @@ app.get("/api/recent", async (c) => {
 
   // KV 응답 캐시: 당월 10분 / exactDate(확정) 6시간 / 과거 7일
   const recentTtl = exactDate ? 25 * 3600 : (yyyymm >= curYmd() ? 25 * 3600 : 7 * 24 * 3600);
-  const recentKey = `resp:recent:v2:${dataset}:${scope}:${yyyymm}:${exactDate ?? ""}:${limit}`;
+  const recentKey = `resp:recent:v3:${dataset}:${scope}:${yyyymm}:${exactDate ?? ""}:${limit}`; // v3: extra 군살 제거
   const payload = await cachedJson(c.env, recentKey, recentTtl, async () => {
     const codes = scope === "all" ? null : scopeCodes(scope);
     const deals = await recentDeals(c.env, dataset, yyyymm, codes, limit, exactDate);
