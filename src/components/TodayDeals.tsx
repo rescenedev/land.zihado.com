@@ -96,6 +96,19 @@ export function TodayDeals({
     if (!isToday) router.prefetch(hrefFor(shiftDate(date, 1), sido, dataset, today));
   }, [date, sido, dataset, today, isToday, router]);
 
+  // 키보드 ← → 로 날짜 이동(‹ › 버튼과 동일). 입력 중·브라우저 단축키(⌘←=뒤로)는 무시.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
+      if (e.key === "ArrowLeft") { e.preventDefault(); go(shiftDate(date, -1), sido, dataset); }
+      else if (e.key === "ArrowRight" && !isToday && !isFuture) { e.preventDefault(); go(shiftDate(date, 1), sido, dataset); }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [date, sido, dataset, today, isToday, isFuture]);
+
   // 가격순 정렬 + 게임화 뱃지 계산
   const { sorted, topRiserId, longestGapId } = useMemo(() => {
     const s = [...deals].sort((a, b) => (b.dealAmount || b.deposit) - (a.dealAmount || a.deposit));
