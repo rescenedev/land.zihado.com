@@ -465,9 +465,7 @@ export default function HomeClient({
                 className={`shrink-0 rounded-full px-3 py-1.5 text-sm font-medium transition ${
                   active
                     ? "bg-blue-600 text-white"
-                    : sd !== "전국" && isHot(sd, true)
-                      ? "bg-blue-500/15 text-blue-300 shadow-[0_0_10px_-2px_rgba(59,130,246,0.6)] ring-1 ring-blue-500/40"
-                      : "bg-slate-800/60 text-slate-400 hover:text-slate-200"
+                    : "bg-slate-800/60 text-slate-400 hover:text-slate-200"
                 }`}
               >
                 {sd}
