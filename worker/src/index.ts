@@ -479,7 +479,9 @@ app.get("/api/aptmap", async (c) => {
   // KV 응답 캐시: 지오코딩 결과가 안정적이면 재활용 (줌인 반복 시 즉시 응답). v2=12개월 윈도우.
   const aptmapKey = `resp:aptmap:v3:${dataset}:${region}:${fromYmd}-${yyyymm}`;
   const kvHit = await c.env.CACHE.get(aptmapKey, "json");
-  if (kvHit) return c.json(kvHit as object, 200, { "Cache-Control": "public, max-age=300" });
+  // KV 히트 = 지오코딩 안정된 엔트리(좌표 불변) → 일1회 데이터 주기로 길게 캐시(s-maxage=300
+  // 5분 revalidation 폭주 제거, p99 꼬리 완화). SWR 7일이라 만료돼도 stale 즉시.
+  if (kvHit) return c.json(kvHit as object, 200, { "Cache-Control": `public, max-age=${respTtl(yyyymm)}` });
 
   await ensureMonth(c.env, dataset, region, yyyymm);
   const aggs = (await aptAggregatesRange(c.env, dataset, region, fromYmd, yyyymm)).slice(0, limit);
@@ -522,15 +524,17 @@ app.get("/api/aptmap", async (c) => {
   const result = { region, yyyymm, count: items.length, items };
   // 전부 지오코딩되면 정상 TTL, 일부 실패 시 짧은 TTL(좌표는 apt_coords 에 영속 →
   // 다음 요청에서 누락분만 재시도하며 점진적으로 채워짐). aggs 가 비면 캐시 안 함.
+  // ≥97% 지오코딩되면 정상 TTL(25h). 불량주소 소수(영구 실패)는 허용 — 안 그러면
+  // 그 구 aptmap 이 영영 300s 콜드(items>=aggs 영원히 거짓). 좌표는 apt_coords 에 영속.
+  // HTTP Cache-Control 도 동일: 완성=길게(CDN revalidation 폭주 제거), 미완성=300s(좌표 채움 유도).
+  const complete = aggs.length > 0 && items.length >= Math.floor(aggs.length * 0.97);
+  const maxAge = complete ? respTtl(yyyymm) : 300;
   if (aggs.length > 0) {
-    // ≥97% 지오코딩되면 정상 TTL(25h). 불량주소 소수(영구 실패)는 허용 — 안 그러면
-    // 그 구 aptmap 이 영영 300s 콜드(items>=aggs 영원히 거짓). 좌표는 apt_coords 에 영속.
-    const ttl = items.length >= Math.floor(aggs.length * 0.97) ? respTtl(yyyymm) : 300;
     c.executionCtx.waitUntil(
-      c.env.CACHE.put(aptmapKey, JSON.stringify(result), { expirationTtl: ttl })
+      c.env.CACHE.put(aptmapKey, JSON.stringify(result), { expirationTtl: maxAge })
     );
   }
-  return c.json(result, 200, { "Cache-Control": "public, max-age=300" });
+  return c.json(result, 200, { "Cache-Control": `public, max-age=${maxAge}` });
 });
 
 // 단지 좌표 사전 배치 수집(단일 구, 동기). 그 구의 모든 distinct 단지를 즉시 지오코딩→apt_coords.
