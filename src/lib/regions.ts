@@ -147,3 +147,11 @@ export const REGIONS: Region[] = [
 ];
 
 export const ALL_DISTRICTS: District[] = REGIONS.flatMap((r) => r.districts);
+
+// 시도명 → 시군구코드(sggCd) 2자리 prefix. worker/src/regions.ts 와 동일하게 유지.
+// 전국 데이터를 클라에서 시도별로 즉시 필터할 때 사용(낙관적 전환).
+export const SIDO_PREFIX: Record<string, string> = {
+  서울: "11", 경기: "41", 인천: "28", 부산: "26", 대구: "27", 광주: "29",
+  대전: "30", 울산: "31", 세종: "36", 강원: "51", 충북: "43", 충남: "44",
+  전북: "52", 전남: "46", 경북: "47", 경남: "48", 제주: "50",
+};

@@ -1,10 +1,10 @@
 "use client";
 
-import { useEffect, useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { fetchComplexDeals, shiftMonth, type Transaction } from "@/lib/api";
 import { formatDeal, pyeong } from "@/lib/format";
-import { ALL_DISTRICTS } from "@/lib/regions";
+import { ALL_DISTRICTS, SIDO_PREFIX } from "@/lib/regions";
 import { ComplexDetail } from "./ComplexDetail";
 import { TodayCharts } from "./TodayCharts";
 import { Sparkline } from "./Sparkline";
@@ -75,6 +75,7 @@ export function TodayDeals({
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [busy, setBusy] = useState(false); // 지연 로딩 플래그(빠른 전환엔 깜빡임 방지)
+  const [pendingSido, setPendingSido] = useState<string | null>(null); // 낙관적 전환 타깃 시도
   const [selected, setSelected] = useState<{ region: string; apt: string; umdNm?: string; jibun?: string } | null>(null);
 
   const today = todayStr();
@@ -82,13 +83,40 @@ export function TodayDeals({
   const date = initialDate ?? today;
   const sido = initialSido;
   const dataset = initialDataset;
-  const deals = initialDeals ?? [];
 
   const isToday = date === today;
   const isFuture = date > today;
 
-  const go = (d: string, s: string, ds: string) =>
+  // 전국(scope=all) 응답을 date|dataset 키로 캐시 → 지역 전환 시 즉시 필터(스피너 제거).
+  // 컴포넌트는 라우트 네비게이션 동안 마운트 유지라 ref 가 세션 내 보존됨.
+  const allCacheRef = useRef<Map<string, Transaction[]>>(new Map());
+  useEffect(() => {
+    if (sido === "전국" && initialDeals && initialDeals.length > 0) {
+      allCacheRef.current.set(`${date}|${dataset}`, initialDeals);
+    }
+  }, [sido, date, dataset, initialDeals]);
+
+  // 낙관적 표시 데이터: 전환 중이고 같은 날짜·데이터셋의 전국 캐시가 있으면 시도별로 필터.
+  // 전국 top-300 의 부분집합이라 불완전·고가편향 → 실제 지역 응답 도착 시 props 로 교체(보정).
+  // 필터 결과가 0이면(소형 시도) null → 정확한 "불러오는 중" 으로 폴백.
+  const optimistic = useMemo<Transaction[] | null>(() => {
+    if (!isPending || !pendingSido) return null;
+    const cached = allCacheRef.current.get(`${date}|${dataset}`);
+    if (!cached) return null;
+    if (pendingSido === "전국") return cached;
+    const pre = SIDO_PREFIX[pendingSido];
+    if (!pre) return null;
+    const f = cached.filter((t) => (t.sggCd ?? "").startsWith(pre));
+    return f.length > 0 ? f : null;
+  }, [isPending, pendingSido, date, dataset]);
+
+  const deals = optimistic ?? initialDeals ?? [];
+
+  const go = (d: string, s: string, ds: string) => {
+    // 같은 날짜·데이터셋 내 시도 전환만 낙관적 필터 대상(전국 캐시 재사용 가능).
+    setPendingSido(d === date && ds === dataset && s !== sido ? s : null);
     startTransition(() => router.push(hrefFor(d, s, ds, today), { scroll: false }));
+  };
 
   // 인접 날짜 프리페치(이전 5일 + 다음 1일) → ‹ 연속 클릭도 RSC 클라 캐시 HIT(즉시 전환).
   // prefetch 는 RSC 페이로드를 미리 받아두므로 CDN 콜드여도 사용자는 대기 안 함.
@@ -112,10 +140,13 @@ export function TodayDeals({
 
   // 전환이 200ms 넘게 걸릴 때만 로딩 표시 → 프리페치/빈 날짜 빠른 전환엔 깜빡임 없음
   useEffect(() => {
-    if (!isPending) { setBusy(false); return; }
+    if (!isPending) { setBusy(false); setPendingSido(null); return; }
     const t = setTimeout(() => setBusy(true), 200);
     return () => clearTimeout(t);
   }, [isPending]);
+
+  // 낙관적 목록을 보여주는 동안엔 스피너/흐림 숨김(즉시 체감) → 도착 시 조용히 교체.
+  const showBusy = busy && !optimistic;
 
   // 가격순 정렬 + 게임화 뱃지 계산
   const { sorted, topRiserId, longestGapId } = useMemo(() => {
@@ -192,15 +223,15 @@ export function TodayDeals({
       {sorted.length > 0 && <TodayCharts deals={sorted} />}
 
       <div className="mb-3 text-sm font-medium text-slate-300">
-        {busy ? "불러오는 중…" : `${sorted.length}건`}
-        {!busy && sorted.length === 0 && <span className="ml-1 text-slate-500">· 이 날짜 신고된 거래가 없습니다</span>}
+        {showBusy ? "불러오는 중…" : `${sorted.length}건`}
+        {!showBusy && sorted.length === 0 && <span className="ml-1 text-slate-500">· 이 날짜 신고된 거래가 없습니다</span>}
       </div>
 
       {/* 전환 중에는 직전 데이터를 흐리게 유지(스켈레톤 깜빡임 없이). 데이터 없으면 안내. */}
-      {sorted.length === 0 && !busy ? (
+      {sorted.length === 0 && !showBusy ? (
         <div className="py-16 text-center text-slate-500">{isFuture ? "아직 오지 않은 날짜입니다." : "‹ › 로 다른 날짜를 확인해보세요."}</div>
       ) : (
-        <div className={`grid grid-cols-1 gap-2 transition-opacity sm:grid-cols-2 xl:grid-cols-3 ${busy ? "opacity-50" : ""}`}>
+        <div className={`grid grid-cols-1 gap-2 transition-opacity sm:grid-cols-2 xl:grid-cols-3 ${showBusy ? "opacity-50" : ""}`}>
           {sorted.map((tx, i) => {
             const id = `${tx.id ?? ""}-${tx.aptName}`;
             const badges: { t: string; cls: string }[] = [];
