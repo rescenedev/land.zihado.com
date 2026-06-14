@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
-import { fetchRecent, type Transaction } from "@/lib/api";
+import { useEffect, useMemo, useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
+import { type Transaction } from "@/lib/api";
 import { formatDeal, pyeong } from "@/lib/format";
 import { ALL_DISTRICTS } from "@/lib/regions";
 import { ComplexDetail } from "./ComplexDetail";
@@ -18,7 +19,6 @@ const SIDO_TABS = [
   "전국", "서울", "경기", "인천", "부산", "대구", "광주", "대전", "울산",
   "세종", "강원", "충북", "충남", "전북", "전남", "경북", "경남", "제주",
 ];
-const scopeOf = (sido: string) => (sido === "전국" ? "all" : sido === "서울" ? "seoul" : sido);
 
 function pad(n: number): string {
   return String(n).padStart(2, "0");
@@ -48,35 +48,52 @@ function dowOf(date: string): string {
 const regionName = (sggCd: string) =>
   ALL_DISTRICTS.find((d) => d.code === sggCd)?.name ?? sggCd;
 
-export function TodayDeals({ initialDeals }: { initialDeals?: Transaction[] | null }) {
-  const [dataset, setDataset] = useState("aptTrade");
-  const [sido, setSido] = useState("전국");
-  const [date, setDate] = useState(todayStr());
-  const hasSeed = !!initialDeals && initialDeals.length > 0;
-  // 서버 SSR 초기 거래(오늘·전국·매매)로 seed → 첫 페인트에 즉시(스켈레톤 제거)
-  const [deals, setDeals] = useState<Transaction[]>(initialDeals ?? []);
-  const [loading, setLoading] = useState(!hasSeed);
+// 현재 선택을 경로 세그먼트로 인코딩 — /today/[date]/[sido]/[dataset].
+// 기본값은 뒤에서부터 생략(/today 가 깔끔하게 유지). 하위 세그먼트가 있으면 상위는 필수.
+function hrefFor(date: string, sido: string, dataset: string, today: string): string {
+  const needDataset = dataset !== "aptTrade";
+  const needSido = needDataset || sido !== "전국";
+  const needDate = needSido || date !== today;
+  const parts: string[] = [];
+  if (needDate) parts.push(date);
+  if (needSido) parts.push(encodeURIComponent(sido));
+  if (needDataset) parts.push(dataset);
+  return `/today${parts.length ? `/${parts.join("/")}` : ""}`;
+}
+
+export function TodayDeals({
+  initialDeals,
+  initialDataset = "aptTrade",
+  initialSido = "전국",
+  initialDate,
+}: {
+  initialDeals?: Transaction[] | null;
+  initialDataset?: string;
+  initialSido?: string;
+  initialDate?: string;
+}) {
+  const router = useRouter();
+  const [isPending, startTransition] = useTransition();
   const [selected, setSelected] = useState<{ region: string; apt: string; umdNm?: string; jibun?: string } | null>(null);
-  const firstRun = useRef(true);
 
   const today = todayStr();
+  // 표시 상태 = 현재 URL(서버에서 받은 props). 클라 페치 없음 — 전환은 라우트 네비게이션.
+  const date = initialDate ?? today;
+  const sido = initialSido;
+  const dataset = initialDataset;
+  const deals = initialDeals ?? [];
+
   const isToday = date === today;
   const isFuture = date > today;
 
+  const go = (d: string, s: string, ds: string) =>
+    startTransition(() => router.push(hrefFor(d, s, ds, today), { scroll: false }));
+
+  // 인접 날짜 프리페치 → ‹ › 즉시 전환(스켈레톤 없음)
   useEffect(() => {
-    let alive = true;
-    // 첫 마운트 + SSR seed 있으면 스켈레톤 없이 백그라운드 갱신만(seed 즉시 표시 유지).
-    // seed 없거나 파라미터 변경이면 스켈레톤 표시.
-    const skipSkeleton = firstRun.current && hasSeed;
-    firstRun.current = false;
-    if (!skipSkeleton) setLoading(true);
-    fetchRecent(ymdOfDate(date), scopeOf(sido), dataset, 300, date)
-      .then((r) => alive && setDeals(r.deals))
-      .finally(() => alive && setLoading(false));
-    return () => {
-      alive = false;
-    };
-  }, [date, dataset, sido]);
+    router.prefetch(hrefFor(shiftDate(date, -1), sido, dataset, today));
+    if (!isToday) router.prefetch(hrefFor(shiftDate(date, 1), sido, dataset, today));
+  }, [date, sido, dataset, today, isToday, router]);
 
   // 가격순 정렬 + 게임화 뱃지 계산
   const { sorted, topRiserId, longestGapId } = useMemo(() => {
@@ -112,21 +129,21 @@ export function TodayDeals({ initialDeals }: { initialDeals?: Transaction[] | nu
         </div>
         <div className="flex items-center gap-2">
           <div className="flex items-center gap-1 rounded-lg border border-slate-700 bg-slate-800/40 p-1">
-            <button onClick={() => setDate((d) => shiftDate(d, -1))} className="flex h-8 w-8 items-center justify-center rounded-md text-slate-300 hover:bg-slate-700" aria-label="이전 날짜">‹</button>
+            <button onClick={() => go(shiftDate(date, -1), sido, dataset)} className="flex h-8 w-8 items-center justify-center rounded-md text-slate-300 hover:bg-slate-700" aria-label="이전 날짜">‹</button>
             <label className="relative flex min-w-[150px] cursor-pointer items-center justify-center px-2 text-sm font-semibold text-slate-100">
               {date} ({dowOf(date)})
-              <input type="date" value={date} max={today} onChange={(e) => e.target.value && setDate(e.target.value)} className="absolute inset-0 cursor-pointer opacity-0" />
+              <input type="date" value={date} max={today} onChange={(e) => e.target.value && go(e.target.value, sido, dataset)} className="absolute inset-0 cursor-pointer opacity-0" />
             </label>
-            <button onClick={() => setDate((d) => shiftDate(d, 1))} disabled={isFuture || isToday} className="flex h-8 w-8 items-center justify-center rounded-md text-slate-300 hover:bg-slate-700 disabled:opacity-30 disabled:hover:bg-transparent" aria-label="다음 날짜">›</button>
+            <button onClick={() => go(shiftDate(date, 1), sido, dataset)} disabled={isFuture || isToday} className="flex h-8 w-8 items-center justify-center rounded-md text-slate-300 hover:bg-slate-700 disabled:opacity-30 disabled:hover:bg-transparent" aria-label="다음 날짜">›</button>
           </div>
-          <button onClick={() => setDate(today)} disabled={isToday} className="rounded-lg border border-slate-700 px-3 py-1.5 text-sm text-slate-300 hover:bg-slate-800 disabled:opacity-40">오늘</button>
+          <button onClick={() => go(today, sido, dataset)} disabled={isToday} className="rounded-lg border border-slate-700 px-3 py-1.5 text-sm text-slate-300 hover:bg-slate-800 disabled:opacity-40">오늘</button>
         </div>
       </div>
 
       {/* 데이터셋 탭 */}
       <div className="mb-3 flex gap-1 border-b border-slate-800">
         {TABS.map((t) => (
-          <button key={t.key} onClick={() => setDataset(t.key)} className={`-mb-px border-b-2 px-4 py-2 text-sm font-medium transition ${dataset === t.key ? "border-blue-500 text-blue-400" : "border-transparent text-slate-400 hover:text-slate-200"}`}>{t.label}</button>
+          <button key={t.key} onClick={() => go(date, sido, t.key)} className={`-mb-px border-b-2 px-4 py-2 text-sm font-medium transition ${dataset === t.key ? "border-blue-500 text-blue-400" : "border-transparent text-slate-400 hover:text-slate-200"}`}>{t.label}</button>
         ))}
       </div>
 
@@ -135,7 +152,7 @@ export function TodayDeals({ initialDeals }: { initialDeals?: Transaction[] | nu
         {SIDO_TABS.map((sd) => (
           <button
             key={sd}
-            onClick={() => setSido(sd)}
+            onClick={() => go(date, sd, dataset)}
             className={`shrink-0 rounded-full px-3 py-1.5 text-sm font-medium transition ${
               sido === sd ? "bg-blue-600 text-white" : "bg-slate-800/60 text-slate-400 hover:text-slate-200"
             }`}
@@ -146,23 +163,18 @@ export function TodayDeals({ initialDeals }: { initialDeals?: Transaction[] | nu
       </div>
 
       {/* 그날 거래 요약 차트 */}
-      {!loading && sorted.length > 0 && <TodayCharts deals={sorted} />}
+      {sorted.length > 0 && <TodayCharts deals={sorted} />}
 
       <div className="mb-3 text-sm font-medium text-slate-300">
-        {loading ? "불러오는 중…" : `${sorted.length}건`}
-        {!loading && sorted.length === 0 && <span className="ml-1 text-slate-500">· 이 날짜 신고된 거래가 없습니다</span>}
+        {isPending ? "불러오는 중…" : `${sorted.length}건`}
+        {!isPending && sorted.length === 0 && <span className="ml-1 text-slate-500">· 이 날짜 신고된 거래가 없습니다</span>}
       </div>
 
-      {loading ? (
-        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-3">
-          {Array.from({ length: 6 }).map((_, i) => (
-            <div key={i} className="h-[76px] animate-pulse rounded-xl border border-slate-800 bg-[#111a2e]" />
-          ))}
-        </div>
-      ) : sorted.length === 0 ? (
+      {/* 전환 중에는 직전 데이터를 흐리게 유지(스켈레톤 깜빡임 없이). 데이터 없으면 안내. */}
+      {sorted.length === 0 && !isPending ? (
         <div className="py-16 text-center text-slate-500">{isFuture ? "아직 오지 않은 날짜입니다." : "‹ › 로 다른 날짜를 확인해보세요."}</div>
       ) : (
-        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-3">
+        <div className={`grid grid-cols-1 gap-2 transition-opacity sm:grid-cols-2 xl:grid-cols-3 ${isPending ? "opacity-50" : ""}`}>
           {sorted.map((tx, i) => {
             const id = `${tx.id ?? ""}-${tx.aptName}`;
             const badges: { t: string; cls: string }[] = [];

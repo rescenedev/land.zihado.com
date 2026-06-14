@@ -50,12 +50,14 @@ export async function ssrStatistics(
 
 export async function ssrTodayDeals(
   dataset = "aptTrade",
-  scope = "all"
+  scope = "all",
+  date?: string
 ): Promise<Transaction[] | null> {
   try {
-    const date = kstDate();
+    const day = date ?? kstDate();
+    const ym = `${day.slice(0, 4)}${day.slice(5, 7)}`; // YYYY-MM-DD → YYYYMM
     const r = await fetch(
-      `${WORKER}/api/recent?dataset=${dataset}&scope=${scope}&yyyymm=${kstYmd()}&limit=300&date=${date}`,
+      `${WORKER}/api/recent?dataset=${dataset}&scope=${encodeURIComponent(scope)}&yyyymm=${ym}&limit=300&date=${day}`,
       { next: { revalidate: 1800 } }
     );
     if (!r.ok) return null;
