@@ -22,7 +22,7 @@ export const options = {
 
 export default function () {
   const param = INVALID_PARAMS[__ITER % INVALID_PARAMS.length];
-  const url = `${BASE_URL}/api/transactions?lawdCd=${param.lawdCd}&dealYmd=${param.dealYmd}`;
+  const url = `${BASE_URL}/api/transactions?dataset=aptTrade&region=${param.region}&yyyymm=${param.yyyymm}`;
 
   const res = http.get(url, { tags: { expected_status: "400" } });
 

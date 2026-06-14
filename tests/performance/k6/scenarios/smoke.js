@@ -19,8 +19,8 @@ export const options = {
 
 export default function () {
   // 1. 정상 요청
-  const { lawdCd, dealYmd } = TEST_PARAMS[0];
-  const res = http.get(buildUrl(lawdCd, dealYmd), {
+  const { region, yyyymm } = TEST_PARAMS[0];
+  const res = http.get(buildUrl(region, yyyymm), {
     tags: { expected_status: "200" },
     responseCallback: http.expectedStatuses(200),
   });
@@ -37,7 +37,7 @@ export default function () {
   sleep(1);
 
   // 2. 유효성 검사 실패 — 빠른 응답 확인
-  const badRes = http.get(buildUrl("invalid", "202504"), {
+  const badRes = http.get(buildUrl("invalid", "202606"), {
     tags: { expected_status: "400" },
     responseCallback: http.expectedStatuses(400),
   });

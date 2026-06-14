@@ -1,6 +1,6 @@
 // k6 공통 설정 — 시나리오별로 import해서 사용
 // WORKER_URL: Cloudflare Worker (모든 /api/* 실제 백엔드)
-// BASE_URL: Next.js 앱 (프론트 + /api/transactions MOLIT 프록시)
+// BASE_URL: Next.js 앱 (프론트 + /api/* Vercel 프록시)
 export const WORKER_URL = __ENV.WORKER_URL || "http://localhost:8787";
 export const BASE_URL = __ENV.BASE_URL || "http://localhost:3000";
 
@@ -16,6 +16,8 @@ export const THRESHOLDS = {
   "http_req_duration{expected_status:400}": ["p(95)<200"],
 };
 
-export function buildUrl(lawdCd, dealYmd) {
-  return `${BASE_URL}/api/transactions?lawdCd=${lawdCd}&dealYmd=${dealYmd}`;
+// 현행 계약: /api/transactions?dataset=&region=<5자리 시군구>&yyyymm=
+// (구 lawdCd/dealYmd 계약은 폐기 — region 누락 시 400 "region(5자리) 필요")
+export function buildUrl(region, yyyymm, dataset = "aptTrade") {
+  return `${BASE_URL}/api/transactions?dataset=${dataset}&region=${region}&yyyymm=${yyyymm}`;
 }

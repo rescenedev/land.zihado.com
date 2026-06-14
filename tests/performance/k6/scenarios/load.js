@@ -27,8 +27,8 @@ export default function () {
   // VU 인덱스 기반으로 테스트 파라미터 순환
   const param = TEST_PARAMS[__VU % TEST_PARAMS.length];
 
-  const res = http.get(buildUrl(param.lawdCd, param.dealYmd), {
-    tags: { expected_status: "200", region: param.lawdCd },
+  const res = http.get(buildUrl(param.region, param.yyyymm), {
+    tags: { expected_status: "200", region: param.region },
     timeout: "10s",
   });
 

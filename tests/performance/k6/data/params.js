@@ -1,15 +1,15 @@
-// 테스트에 사용할 실제 법정동코드 + 거래년월 조합
+// 테스트에 사용할 실제 시군구코드(region, 5자리) + 거래년월(yyyymm) 조합
 export const TEST_PARAMS = [
-  { lawdCd: "11680", dealYmd: "202504" }, // 서울 강남구
-  { lawdCd: "11650", dealYmd: "202504" }, // 서울 서초구
-  { lawdCd: "11710", dealYmd: "202504" }, // 서울 송파구
-  { lawdCd: "11110", dealYmd: "202504" }, // 서울 종로구
-  { lawdCd: "11680", dealYmd: "202503" }, // 서울 강남구 (전월)
-  { lawdCd: "11650", dealYmd: "202503" }, // 서울 서초구 (전월)
+  { region: "11680", yyyymm: "202606" }, // 서울 강남구 (당월)
+  { region: "11650", yyyymm: "202606" }, // 서울 서초구 (당월)
+  { region: "11710", yyyymm: "202606" }, // 서울 송파구 (당월)
+  { region: "11110", yyyymm: "202606" }, // 서울 종로구 (당월)
+  { region: "11680", yyyymm: "202605" }, // 서울 강남구 (전월)
+  { region: "11650", yyyymm: "202605" }, // 서울 서초구 (전월)
 ];
 
 export const INVALID_PARAMS = [
-  { lawdCd: "abc",   dealYmd: "202504" }, // 잘못된 lawdCd
-  { lawdCd: "11680", dealYmd: "20254"  }, // 잘못된 dealYmd
-  { lawdCd: "",      dealYmd: "202504" }, // 빈 lawdCd
+  { region: "abc",   yyyymm: "202606" }, // 잘못된 region (5자리 아님) → 400
+  { region: "11680", yyyymm: "20256"  }, // 잘못된 yyyymm
+  { region: "",      yyyymm: "202606" }, // 빈 region → 400
 ];

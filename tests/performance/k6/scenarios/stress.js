@@ -30,7 +30,7 @@ export const options = {
 export default function () {
   const param = TEST_PARAMS[__ITER % TEST_PARAMS.length];
 
-  const res = http.get(buildUrl(param.lawdCd, param.dealYmd), {
+  const res = http.get(buildUrl(param.region, param.yyyymm), {
     tags: { expected_status: "200" },
     timeout: "15s",
   });
