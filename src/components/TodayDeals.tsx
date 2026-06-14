@@ -144,7 +144,7 @@ export function TodayDeals({
       {/* 데이터셋 탭 */}
       <div className="mb-3 flex gap-1 border-b border-slate-800">
         {TABS.map((t) => (
-          <button key={t.key} onClick={() => go(date, sido, t.key)} className={`-mb-px border-b-2 px-4 py-2 text-sm font-medium transition ${dataset === t.key ? "border-blue-500 text-blue-400" : "border-transparent text-slate-400 hover:text-slate-200"}`}>{t.label}</button>
+          <button key={t.key} onClick={() => go(date, sido, t.key)} onMouseEnter={() => router.prefetch(hrefFor(date, sido, t.key, today))} className={`-mb-px border-b-2 px-4 py-2 text-sm font-medium transition ${dataset === t.key ? "border-blue-500 text-blue-400" : "border-transparent text-slate-400 hover:text-slate-200"}`}>{t.label}</button>
         ))}
       </div>
 
@@ -154,6 +154,7 @@ export function TodayDeals({
           <button
             key={sd}
             onClick={() => go(date, sd, dataset)}
+            onMouseEnter={() => router.prefetch(hrefFor(date, sd, dataset, today))}
             className={`shrink-0 rounded-full px-3 py-1.5 text-sm font-medium transition ${
               sido === sd ? "bg-blue-600 text-white" : "bg-slate-800/60 text-slate-400 hover:text-slate-200"
             }`}
