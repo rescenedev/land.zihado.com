@@ -64,7 +64,7 @@ export default function HomeClient({
   const pollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const curYm = ymdOf(new Date());
   const navedRef = useRef(false);      // 사용자가 직접 월 네비하면 자동 점프 중단
-  const fallbackRef = useRef(0);       // 빈 월 자동 뒤로 탐색 횟수(무한루프 방지)
+  const fellBackRef = useRef(false);   // 빈 당월 → 이전 월 자동 점프(딱 1회)
 
   // 기준월 이동(‹ › 버튼·키보드 공용). 미래월은 데이터 없으니 차단.
   const stepMonth = useCallback((delta: number) => {
@@ -81,13 +81,6 @@ export default function HomeClient({
     try {
       const res = await fetchOverview(yyyymm, scope, dataset);
       setData(res);
-      // 실거래 없는 월(당월 미신고 등) → 가장 최근 실거래 있는 월로 자동 점프(최대 6개월).
-      // 사용자가 직접 네비한 뒤에는 빈 월도 그대로 보여줌(navedRef).
-      if (!navedRef.current && res.totals.count === 0 && fallbackRef.current < 6) {
-        fallbackRef.current += 1;
-        setYyyymm((m) => shiftMonth(m, -1));
-        return;
-      }
       if (res.totals.loaded < res.totals.regions) {
         pollRef.current = setTimeout(load, 2500);
       }
@@ -118,6 +111,21 @@ export default function HomeClient({
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [stepMonth, paletteOpen, detail, complex, mapDetail]);
+
+  // 당월이 '실거래 0건'으로 확정되면(콜드 채움 후에도 0 = 아직 신고 없는 달) 가장 최근
+  // 실거래 월로 1회만 점프. 콜드/채우는 중(count 일시 0)에는 점프 안 함 — 1.5초 기다려
+  // 폴링이 채울 시간을 준 뒤에도 0일 때만. 사용자가 직접 월을 옮기면(navedRef) 비활성.
+  useEffect(() => {
+    if (fellBackRef.current || navedRef.current) return;
+    if (yyyymm !== curYm) return;                 // 당월에서만
+    if (!data || data.totals.count > 0) return;   // 데이터 있으면 그대로
+    const t = setTimeout(() => {
+      if (fellBackRef.current || navedRef.current) return;
+      fellBackRef.current = true;
+      setYyyymm((m) => shiftMonth(m, -1));         // 직전(가장 최근 실거래) 월로
+    }, 1500);
+    return () => clearTimeout(t);
+  }, [data, yyyymm, curYm]);
 
   // 전국(all) 표시 중에는 별도 scope인 '서울' 데이터를 백그라운드로 미리 읽어둠
   // → 서울 칩 클릭 시 네트워크 0(즉시). 전국 데이터엔 나머지 시도가 모두 포함됨.
