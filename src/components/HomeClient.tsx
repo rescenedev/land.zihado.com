@@ -628,8 +628,8 @@ export default function HomeClient({
         <footer className="mt-12 space-y-1.5 border-t border-slate-800/60 pt-4 text-center text-[11px] text-slate-600">
           <div className="text-slate-500">
             <span className="font-medium text-emerald-400/80">성능</span>
-            {" · "}엣지 HIT p50 ~14ms{" · "}p99 ~75ms{" · "}콜드(워커직결) ~50ms{" · "}엣지캐시 HIT
-            <span className="ml-1 text-slate-600">(oha/k6 실측 1000req · 한국↔엣지 왕복 포함)</span>
+            {" · "}엣지 HIT p50 ~15ms{" · "}p95 ~23ms{" · "}p99 ~55ms{" · "}콜드(워커직결) ~55ms{" · "}엣지캐시 HIT
+            <span className="ml-1 text-slate-600">(oha 실측 3000req · 한국↔엣지 왕복 포함 · p99는 정적자산 망 바닥과 동일)</span>
           </div>
           <div>데이터 출처: 국토교통부 실거래가 공개시스템 (data.go.kr) · KV/D1 캐시 백엔드 · 지도 © Kakao</div>
         </footer>
