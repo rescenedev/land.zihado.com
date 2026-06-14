@@ -141,6 +141,10 @@ export async function GET(req: Request): Promise<Response> {
   stat.ssrHtml = await warm(pageUrls);
   stat.ssrRsc = await warm(pageUrls, 20, true);
 
+  // ── 5) 적재 manifest 를 Edge Config 에 publish → 프록시가 "데이터 없음" 을 서울에서 즉시 판별
+  //       (도쿄 왕복 없이 filling 응답 ≤15ms). 토큰 미설정이면 skip(쇼트서킷 비활성, 기존 동작).
+  const published = await publishManifest();
+
   const total = Object.values(stat).reduce((s, n) => s + n, 0);
   return NextResponse.json({
     ok: true,
@@ -151,6 +155,36 @@ export async function GET(req: Request): Promise<Response> {
     codes: Object.fromEntries(Object.entries(codesByDs).map(([k, v]) => [k, v.length])),
     warmed: stat,
     total,
+    manifest: published,
     ms: Date.now() - t0,
   });
+}
+
+// 워커 /api/ingested(적재 manifest) → Vercel Edge Config 'ingested' 키 upsert.
+// 프록시(/api/[...path])가 이 manifest 로 미적재 구를 서울에서 즉시 filling 처리.
+async function publishManifest(): Promise<{ ok: boolean; reason?: string; regions?: number }> {
+  const token = process.env.VERCEL_API_TOKEN;
+  const edgeId = process.env.EDGE_CONFIG_ID; // ecfg_xxx
+  const worker = process.env.WORKER_ORIGIN || "https://api.zihado.com";
+  if (!token || !edgeId) return { ok: false, reason: "VERCEL_API_TOKEN/EDGE_CONFIG_ID 미설정(쇼트서킷 비활성)" };
+  try {
+    const m = (await fetch(`${worker}/api/ingested?months=13`).then((r) => (r.ok ? r.json() : null))) as
+      | { ingested?: Record<string, Record<string, string[]>> }
+      | null;
+    if (!m?.ingested) return { ok: false, reason: "worker /api/ingested 응답 없음" };
+    const regions = Object.values(m.ingested).reduce(
+      (s, byYm) => s + Object.values(byYm).reduce((a, l) => a + l.length, 0),
+      0
+    );
+    const team = process.env.VERCEL_TEAM_ID ? `?teamId=${process.env.VERCEL_TEAM_ID}` : "";
+    const r = await fetch(`https://api.vercel.com/v1/edge-config/${edgeId}/items${team}`, {
+      method: "PATCH",
+      headers: { Authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ items: [{ operation: "upsert", key: "ingested", value: m.ingested }] }),
+    });
+    if (!r.ok) return { ok: false, reason: `edge-config PATCH ${r.status}` };
+    return { ok: true, regions };
+  } catch (e) {
+    return { ok: false, reason: String(e) };
+  }
 }

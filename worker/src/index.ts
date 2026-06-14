@@ -700,6 +700,23 @@ app.post("/api/admin/backfill", async (c) => {
   return c.json({ enqueued: jobs.length, months, datasets: enabledDatasets().map((d) => d.key) });
 });
 
+// 적재 manifest: (dataset × 최근 N개월)별 적재 완료된 시군구코드 목록.
+// Vercel 엣지 프록시가 "데이터 없음(filling)" 을 도쿄 안 가고 서울에서 즉시 판별하는 용도.
+// ⚠️ 출처는 ingest_log(적재 여부) — overview(거래>0)가 아님. 적재됐으나 거래 0건인 구도 포함해야
+//    프록시가 잘못된 영구 filling 을 안 띄움.
+app.get("/api/ingested", async (c) => {
+  const months = recentMonths(Math.min(Math.max(Number(c.req.query("months") ?? "13"), 1), 18));
+  const datasets = enabledDatasets().map((d) => d.key);
+  const out: Record<string, Record<string, string[]>> = {};
+  for (const ds of datasets) {
+    out[ds] = {};
+    for (const ym of months) out[ds][ym] = [...(await ingestedRegions(c.env, ds, ym))];
+  }
+  // 짧은 엣지캐시(워밍 cron 이 일1회 읽음). 키는 작음(코드 5자리 × ~수천).
+  c.header("cache-control", "public, max-age=300");
+  return c.json({ months, datasets, ingested: out });
+});
+
 // region_month_agg 재구축: transactions 원본에서 (dataset × 최근 N개월) agg 전 지역 재계산.
 // 과거 적재분 agg 누락(overview 0건) 일괄 복구. 파라미터 없으면 전 데이터셋 × 최근 12개월.
 app.post("/api/admin/rebuild-agg", async (c) => {
