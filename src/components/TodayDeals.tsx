@@ -66,11 +66,13 @@ export function TodayDeals({
   initialDataset = "aptTrade",
   initialSido = "전국",
   initialDate,
+  latestDealDate,
 }: {
   initialDeals?: Transaction[] | null;
   initialDataset?: string;
   initialSido?: string;
   initialDate?: string;
+  latestDealDate?: string;
 }) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
@@ -86,6 +88,11 @@ export function TodayDeals({
 
   const isToday = date === today;
   const isFuture = date > today;
+
+  // 최신 실거래일 이후의 빈 날(오늘 포함)이면 ‹ 가 하루씩이 아니라 최신 실거래일로 바로 점프.
+  // (서버는 빈 날에만 latestDealDate 를 내려줌 → 데이터 있는 날엔 undefined → 일반 -1 이동.)
+  const canJumpToLatest = !!latestDealDate && date > latestDealDate;
+  const prevTarget = canJumpToLatest ? (latestDealDate as string) : shiftDate(date, -1);
 
   // 전국(scope=all) 응답을 date|dataset 키로 캐시 → 지역 전환 시 즉시 필터(스피너 제거).
   // 컴포넌트는 라우트 네비게이션 동안 마운트 유지라 ref 가 세션 내 보존됨.
@@ -123,7 +130,9 @@ export function TodayDeals({
   useEffect(() => {
     for (let i = 1; i <= 5; i++) router.prefetch(hrefFor(shiftDate(date, -i), sido, dataset, today));
     if (!isToday) router.prefetch(hrefFor(shiftDate(date, 1), sido, dataset, today));
-  }, [date, sido, dataset, today, isToday, router]);
+    // 빈 날 ‹ 점프 타깃(최신 실거래일)도 미리 받아둠 → 클릭 시 즉시 전환.
+    if (canJumpToLatest) router.prefetch(hrefFor(latestDealDate as string, sido, dataset, today));
+  }, [date, sido, dataset, today, isToday, canJumpToLatest, latestDealDate, router]);
 
   // 키보드 ← → 로 날짜 이동(‹ › 버튼과 동일). 입력 중·브라우저 단축키(⌘←=뒤로)는 무시.
   useEffect(() => {
@@ -131,12 +140,12 @@ export function TodayDeals({
       if (e.metaKey || e.ctrlKey || e.altKey) return;
       const t = e.target as HTMLElement | null;
       if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
-      if (e.key === "ArrowLeft") { e.preventDefault(); go(shiftDate(date, -1), sido, dataset); }
+      if (e.key === "ArrowLeft") { e.preventDefault(); go(prevTarget, sido, dataset); }
       else if (e.key === "ArrowRight" && !isToday && !isFuture) { e.preventDefault(); go(shiftDate(date, 1), sido, dataset); }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [date, sido, dataset, today, isToday, isFuture]);
+  }, [date, sido, dataset, today, isToday, isFuture, prevTarget]);
 
   // 전환이 200ms 넘게 걸릴 때만 로딩 표시 → 프리페치/빈 날짜 빠른 전환엔 깜빡임 없음
   useEffect(() => {
@@ -183,7 +192,7 @@ export function TodayDeals({
         <div className="flex flex-col items-end gap-1.5">
           <div className="flex items-center gap-2">
             <div className="flex items-center gap-1 rounded-lg border border-slate-700 bg-slate-800/40 p-1">
-              <button onClick={() => go(shiftDate(date, -1), sido, dataset)} className="flex h-8 w-8 items-center justify-center rounded-md text-slate-300 hover:bg-slate-700" aria-label="이전 날짜">‹</button>
+              <button onClick={() => go(prevTarget, sido, dataset)} className="flex h-8 w-8 items-center justify-center rounded-md text-slate-300 hover:bg-slate-700" aria-label={canJumpToLatest ? "가장 최근 실거래일로 이동" : "이전 날짜"} title={canJumpToLatest ? `가장 최근 실거래일(${latestDealDate})로 이동` : undefined}>‹</button>
               <label className="relative flex min-w-[150px] cursor-pointer items-center justify-center px-2 text-sm font-semibold text-slate-100">
                 {date} ({dowOf(date)})
                 <input type="date" value={date} max={today} onChange={(e) => e.target.value && go(e.target.value, sido, dataset)} className="absolute inset-0 cursor-pointer opacity-0" />
@@ -224,12 +233,31 @@ export function TodayDeals({
 
       <div className="mb-3 text-sm font-medium text-slate-300">
         {showBusy ? "불러오는 중…" : `${sorted.length}건`}
-        {!showBusy && sorted.length === 0 && <span className="ml-1 text-slate-500">· 이 날짜 신고된 거래가 없습니다</span>}
       </div>
 
       {/* 전환 중에는 직전 데이터를 흐리게 유지(스켈레톤 깜빡임 없이). 데이터 없으면 안내. */}
       {sorted.length === 0 && !showBusy ? (
-        <div className="py-16 text-center text-slate-500">{isFuture ? "아직 오지 않은 날짜입니다." : "‹ › 로 다른 날짜를 확인해보세요."}</div>
+        <div className="flex flex-col items-center gap-4 py-16 text-center text-slate-500">
+          {isFuture ? (
+            <p>아직 오지 않은 날짜입니다.</p>
+          ) : canJumpToLatest ? (
+            <>
+              <p className="text-base text-slate-400">
+                {isToday ? "오늘 등록된 실거래가 아직 없습니다." : "이 날짜에 등록된 실거래가 없습니다."}
+              </p>
+              <button
+                onClick={() => go(latestDealDate as string, sido, dataset)}
+                onMouseEnter={() => router.prefetch(hrefFor(latestDealDate as string, sido, dataset, today))}
+                className="rounded-lg border border-blue-500/50 bg-blue-600/10 px-4 py-2 text-sm font-semibold text-blue-300 transition hover:bg-blue-600/20"
+              >
+                ‹ 가장 최근 실거래일({latestDealDate})로 이동
+              </button>
+              <p className="text-xs text-slate-600">‹ 또는 ⬅️ 키로도 이동합니다</p>
+            </>
+          ) : (
+            <p>‹ › 로 다른 날짜를 확인해보세요.</p>
+          )}
+        </div>
       ) : (
         <div className={`grid grid-cols-1 gap-2 transition-opacity sm:grid-cols-2 xl:grid-cols-3 ${showBusy ? "opacity-50" : ""}`}>
           {sorted.map((tx, i) => {

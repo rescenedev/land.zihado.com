@@ -32,23 +32,19 @@ export default async function Page({
 }) {
   const slug = (await params).slug ?? [];
   if (slug[0] && !RE_DATE.test(slug[0])) notFound();
-  const hasExplicitDate = !!slug[0];
   const sido = slug[1] ? decodeURIComponent(slug[1]) : "전국";
   const dataset = slug[2] ?? "aptTrade";
   const scope = scopeOf(sido);
 
-  let date = slug[0] ?? kstDate();
-  let initialDeals = await ssrTodayDeals(dataset, scope, date);
+  const date = slug[0] ?? kstDate();
+  const initialDeals = await ssrTodayDeals(dataset, scope, date);
 
-  // 기본 진입(오늘)인데 오늘 계약분이 아직 0건이면(MOLIT 신고 지연) → 데이터 있는 최신 신고일로
-  // 자동 점프. 사용자가 명시한 날짜(slug[0])는 그대로 둬서 ‹ › 빈날짜 탐색을 막지 않는다.
-  if (!hasExplicitDate && (initialDeals?.length ?? 0) === 0) {
+  // 빈 날짜(오늘은 신고 지연으로 거의 항상)면 "가장 최근 실거래일" 을 구해 클라에 전달.
+  // 자동 점프는 하지 않고 — 빈 상태 안내 + ‹ 화살표 점프 타깃으로만 쓴다.
+  let latestDealDate: string | undefined;
+  if ((initialDeals?.length ?? 0) === 0) {
     const ym = `${date.slice(0, 4)}${date.slice(5, 7)}`;
-    const latest = await ssrLatestDealDate(dataset, scope, ym);
-    if (latest && latest !== date) {
-      date = latest;
-      initialDeals = await ssrTodayDeals(dataset, scope, latest);
-    }
+    latestDealDate = (await ssrLatestDealDate(dataset, scope, ym)) ?? undefined;
   }
 
   return (
@@ -57,6 +53,7 @@ export default async function Page({
       initialDataset={dataset}
       initialSido={sido}
       initialDate={date}
+      latestDealDate={latestDealDate}
     />
   );
 }

@@ -1,0 +1,129 @@
+<!DOCTYPE html><html lang="ko"><head><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Landman 시스템 아키텍처</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#0b1120;color:#e2e8f0;line-height:1.55;padding:2.5rem;max-width:1180px;margin:0 auto}
+h1{font-size:1.8rem;margin-bottom:.2rem}
+h2{font-size:1.15rem;margin:2.4rem 0 .9rem;color:#93c5fd;border-left:3px solid #3b82f6;padding-left:.7rem}
+.meta{color:#94a3b8;font-size:.85rem;margin-bottom:1.5rem}
+.diagram{background:#0f172a;border:1px solid #1e293b;border-radius:.8rem;padding:1.5rem;overflow-x:auto}
+.layer{margin:0 0 1.1rem}
+.layer-title{font-size:.72rem;text-transform:uppercase;letter-spacing:.08em;color:#64748b;margin-bottom:.5rem}
+.row{display:flex;gap:.8rem;flex-wrap:wrap;align-items:stretch}
+.node{border-radius:.6rem;padding:.7rem .9rem;font-size:.85rem;flex:1;min-width:150px}
+.node b{display:block;font-size:.92rem;margin-bottom:.15rem}
+.node small{color:#94a3b8;font-size:.74rem;line-height:1.4;display:block}
+.user{background:#1e3a5f;border:1px solid #3b82f6}
+.vercel{background:#0f2a23;border:1px solid #10b981}
+.cf{background:#3a2410;border:1px solid #f59e0b}
+.ext{background:#2a1830;border:1px solid #a855f7}
+.arrow{text-align:center;color:#475569;font-size:1.3rem;margin:.3rem 0}
+.lat{display:inline-block;background:#16a34a;color:#fff;font-size:.68rem;font-weight:700;padding:.05rem .4rem;border-radius:999px;margin-left:.3rem}
+.lat.slow{background:#d97706}.lat.cold{background:#dc2626}
+table{width:100%;border-collapse:collapse;background:#1e293b;border-radius:.6rem;overflow:hidden;font-size:.86rem;margin-top:.5rem}
+th{background:#0f172a;color:#cbd5e1;padding:.55rem .8rem;text-align:left;font-size:.7rem;text-transform:uppercase}
+td{padding:.5rem .8rem;border-bottom:1px solid #334155;vertical-align:top}
+tr:last-child td{border-bottom:none}
+code{font-family:"SF Mono",monospace;background:#0f172a;padding:.08rem .35rem;border-radius:.25rem;font-size:.8rem;color:#7dd3fc}
+.flow{font-family:"SF Mono",monospace;font-size:.82rem;color:#cbd5e1;line-height:1.9;white-space:pre;overflow-x:auto}
+.note{background:#1e293b;border-radius:.6rem;padding:.9rem 1.2rem;margin-top:.9rem;font-size:.86rem;color:#cbd5e1}
+.note b{color:#fbbf24}
+.legend{display:flex;gap:1.2rem;flex-wrap:wrap;font-size:.78rem;color:#94a3b8;margin-top:.8rem}
+.legend span{display:flex;align-items:center;gap:.35rem}
+.dot{width:11px;height:11px;border-radius:3px;display:inline-block}
+</style></head><body>
+
+<h1>Landman 시스템 아키텍처</h1>
+<p class="meta">국토교통부 실거래가 대시보드 · land.zihado.com · 요청 흐름 / 캐시 계층 / 데이터 적재 / 워밍</p>
+
+<h2>1. 전체 데이터 흐름</h2>
+<div class="diagram">
+  <div class="layer">
+    <div class="layer-title">사용자 (서울)</div>
+    <div class="row"><div class="node user"><b>브라우저</b><small>Next.js 정적 빌드 · 브라우저 메모리 캐시(_mem)로 재방문 0ms</small></div></div>
+  </div>
+  <div class="arrow">▼ ~7ms RTT (한국→서울 엣지)</div>
+  <div class="layer">
+    <div class="layer-title">프론트 + API 프록시 (DNS-only 회색구름 직결)</div>
+    <div class="row">
+      <div class="node vercel"><b>Vercel Edge · ICN(서울)</b><small>정적 프론트 + <code>/api/[...path]</code> 엣지 프록시(리전 icn1 고정)<br>CDN 캐시 HIT → 즉시 응답<span class="lat">~13ms</span></small></div>
+    </div>
+  </div>
+  <div class="arrow">▼ CDN MISS 일 때만</div>
+  <div class="layer">
+    <div class="layer-title">백엔드 (데이터 원본)</div>
+    <div class="row">
+      <div class="node cf"><b>Cloudflare Worker · NRT(도쿄)</b><small>Hono · <code>api.zihado.com</code><br>엣지 캐시(Cache API) → KV → D1<span class="lat slow">~50ms</span></small></div>
+    </div>
+  </div>
+  <div class="arrow">▼ KV/D1 미적재 시</div>
+  <div class="layer">
+    <div class="row">
+      <div class="node cf"><b>KV (mon:/resp:)</b><small>월별 raw + 응답 캐시. evict 없음(long-tail 보관)</small></div>
+      <div class="node cf"><b>D1 (SQLite)</b><small>transactions 130만행 + <b>region_month_agg</b> 사전집계 1만행</small></div>
+      <div class="node cf"><b>Queue</b><small>백필·KV워밍 작업 분산</small></div>
+    </div>
+  </div>
+  <div class="arrow">▼ 최초 적재(cron 1일 1회)</div>
+  <div class="layer">
+    <div class="row"><div class="node ext"><b>국토교통부 MOLIT API</b><small>data.go.kr · 아파트매매/전월세/분양권 · 하루 1회 갱신</small></div>
+    <div class="node ext"><b>Kakao / VWorld</b><small>좌표 지오코딩 · 주변시설 · 지적도 폴리곤</small></div></div>
+  </div>
+  <div class="legend">
+    <span><span class="dot" style="background:#3b82f6"></span>사용자</span>
+    <span><span class="dot" style="background:#10b981"></span>Vercel(서울)</span>
+    <span><span class="dot" style="background:#f59e0b"></span>Cloudflare(도쿄)</span>
+    <span><span class="dot" style="background:#a855f7"></span>외부 API</span>
+  </div>
+</div>
+<div class="note">
+핵심 설계: <b>사용자↔서빙 거리</b>가 응답시간을 지배한다. Cloudflare 고객 zone은 이 회선에서 도쿄(37ms)로 빠지지만 <b>Vercel은 서울(7ms) 직결</b> → 프론트·캐시를 Vercel ICN에 두고, 데이터 원본만 Cloudflare에 둠. land.zihado.com 은 <b>DNS-only(회색구름)</b> 로 Vercel 직결(주황 프록시 금지 — CF 도쿄 경유 방지).
+</div>
+
+<h2>2. 3단 캐시 계층</h2>
+<div class="flow">① 브라우저 메모리(_mem)   재방문 즉시 · 네트워크 0
+② Vercel CDN (서울 엣지)   HIT ~13ms · 함수/워커 미경유 · LRU evict(용량 비공개)
+③ Cloudflare Worker KV     CDN MISS 시 · ~50ms · evict 없음(long-tail 전부 보관)
+④ D1 사전집계 테이블        KV 미스 시 · 1만행 룩업 ~1ms (raw 130만행 스캔 대체)</div>
+<table>
+<thead><tr><th>계층</th><th>역할</th><th>한계 / 용도</th></tr></thead>
+<tbody>
+<tr><td class="bold">Vercel CDN</td><td>서울 엣지에서 즉시 응답(~13ms)</td><td>LRU eviction → <b>핫 bounded 키만</b>(통계·대시보드·recent 전국). 수만 개 욱여넣으면 압력으로 핫키까지 evict (실측: 21k 워밍→177초 뒤 91% MISS)</td></tr>
+<tr><td class="bold">Worker KV</td><td>CDN 미스 백업 · 응답/raw 캐시</td><td>evict 없음 → <b>long-tail(지역상세·단지모달 2만개) 전부 보관</b>. Vercel MISS여도 CF→KV ~50ms</td></tr>
+<tr><td class="bold">D1 사전집계</td><td>overview/통계/추이 즉시 룩업</td><td>실시간 집계 금지 → ingest 시 <code>region_month_agg</code> 갱신</td></tr>
+</tbody>
+</table>
+
+<h2>3. 캐시 워밍 (사용자가 닿기 전에 데움)</h2>
+<table>
+<thead><tr><th>대상</th><th>키 규모</th><th>방식</th></tr></thead>
+<tbody>
+<tr><td class="bold">핫 bounded<br><small>통계·대시보드·recent 전국</small></td><td>~수백</td><td><b>Vercel CDN 워밍</b> (cron <code>30 0 * * *</code>, warmCore) — 용량 내라 유지됨</td></tr>
+<tr><td class="bold">단지 상세 모달</td><td>2만+</td><td><b>Worker KV 워밍</b> (cron <code>42 0 * * *</code>, 큐 분산) — CDN 아님(evict 회피)</td></tr>
+<tr><td class="bold">지역상세·시도탭</td><td>수천</td><td>워밍 안 함 → ingest 시 KV 적재 + <b>프론트 점진 렌더</b>(방지책)</td></tr>
+<tr><td class="bold">갱신 시점</td><td>변경분만</td><td>MOLIT 적재(ensureMonth) 직후 그 지역·단지 키 즉시 워밍</td></tr>
+</tbody>
+</table>
+<div class="note">
+<b>교훈(측정으로 확정):</b> 21,000개 단지모달을 Vercel CDN에 워밍했더니 177초 만에 91%가 MISS(LRU evict + PoP 분산 추정). → long-tail은 CDN이 아니라 <b>evict 없는 Worker KV + 점진 렌더</b>로. CDN 워밍은 핫 bounded에만.
+</div>
+
+<h2>4. 응답 경로별 지연</h2>
+<div class="flow">대시보드/통계(핫)     사용자 → Vercel CDN HIT                      <span style="color:#4ade80">~13ms</span>
+지역상세/단지모달     사용자 → Vercel CDN MISS → CF워커 KV HIT       <span style="color:#fbbf24">~50ms</span>
+완전 콜드(최초 1회)   사용자 → Vercel → CF → D1 집계/MOLIT            <span style="color:#f87171">~0.2~2s</span> (이후 캐시)
+모달 점진 렌더        이력=즉시 / 지도·주변시설=비동기 채움          체감 0 (빈 화면 없음)</div>
+
+<h2>5. 기술 스택</h2>
+<table>
+<tbody>
+<tr><td class="bold">프론트</td><td>Next.js(App Router) · React · Tailwind · Vercel(ICN) · @vercel/analytics</td></tr>
+<tr><td class="bold">백엔드</td><td>Cloudflare Worker(Hono) · D1(SQLite) · KV · Queue · Cron</td></tr>
+<tr><td class="bold">데이터</td><td>국토교통부 MOLIT(매매/전월세/분양권) · Kakao(지오코딩·주변) · VWorld(지적도)</td></tr>
+<tr><td class="bold">도메인</td><td>land.zihado.com → Vercel(DNS-only) · api.zihado.com → CF Worker</td></tr>
+</tbody>
+</table>
+
+<p class="meta" style="margin-top:2rem">관련 문서: docs/PERFORMANCE.md · docs/PERF-DESIGN-PLAYBOOK.md · docs/performance-report.html</p>
+</body></html>
