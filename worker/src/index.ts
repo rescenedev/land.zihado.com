@@ -399,10 +399,15 @@ app.get("/api/lab/presale", async (c) => {
   if (!RE_YMD.test(yyyymm)) return c.json({ error: "yyyymm(YYYYMM) 필요" }, 400);
 
   const ttl = yyyymm >= curYmd() ? 25 * 3600 : 7 * 24 * 3600;
-  const key = `resp:lab:presale:v1:${scope}:${yyyymm}:${limit}`;
+  const key = `resp:lab:presale:v2:${scope}:${yyyymm}:${limit}`; // v2: 지역명 포함
   const payload = await cachedJson(c.env, key, ttl, async () => {
     const codes = scope === "all" ? null : scopeCodes(scope);
-    const regions = await presaleCompareRegions(c.env, yyyymm, codes, limit);
+    const rows = await presaleCompareRegions(c.env, yyyymm, codes, limit);
+    // 지역명(시도+시군구)을 응답에 직접 실어 프론트의 불완전한 코드 매핑 의존 제거.
+    const regions = rows.map((r) => {
+      const info = REGION_NAMES[r.sggCd];
+      return { ...r, name: info ? `${info.sido} ${info.name}` : r.sggCd };
+    });
     return { yyyymm, scope, count: regions.length, regions };
   });
   const cc = yyyymm < curYmd() ? "public, max-age=21600" : "public, max-age=300";

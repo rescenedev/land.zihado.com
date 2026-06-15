@@ -184,6 +184,7 @@ export async function ssrInvest(
 // 데이터랩 분양가비교 — 지역단위 분양권 평단가 vs 매매 평단가.
 export type PresaleRegion = {
   sggCd: string;
+  name: string; // 시도+시군구 (워커 REGION_NAMES)
   silvPpa: number;
   salePpa: number;
   silvN: number;

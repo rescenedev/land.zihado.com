@@ -1,10 +1,6 @@
 // 데이터랩 분양가비교 — 지역(시군구)단위 분양권 평단가 vs 아파트 매매 평단가. 서버컴포넌트.
 import Link from "next/link";
 import type { PresaleRegion } from "@/lib/ssr";
-import { ALL_DISTRICTS } from "@/lib/regions";
-
-const regionName = (sggCd: string) =>
-  ALL_DISTRICTS.find((d) => d.code === sggCd)?.name ?? sggCd;
 
 const won = (manwon: number) => `${manwon.toLocaleString()}만`;
 
@@ -51,7 +47,7 @@ export function LabPresaleView({
                 </span>
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center justify-between gap-3">
-                    <span className="truncate font-semibold text-slate-100">{regionName(r.sggCd)}</span>
+                    <span className="truncate font-semibold text-slate-100">{r.name}</span>
                     <span className={`shrink-0 text-base font-extrabold tabular-nums ${premium ? "text-rose-400" : "text-blue-400"}`}>
                       {premium ? "+" : ""}{r.diffPct}%
                     </span>
