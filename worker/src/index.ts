@@ -21,6 +21,7 @@ import {
   searchAptNames,
   recentDeals,
   latestDealDateInMonth,
+  tradedComplexes,
   aptPriorStats,
   aptMonthlySeries,
   rebuildAgg,
@@ -346,6 +347,70 @@ app.get("/api/recent", async (c) => {
   const cc = exactDate && exactDate.slice(0, 7).replace("-", "") < curYmd()
     ? "public, max-age=21600"
     : (exactDate ? "public, max-age=3600" : "public, max-age=300");
+  return c.json(payload, 200, { "Cache-Control": cc });
+});
+
+// 데이터랩 "많이산단지" — 월·스코프 단지별 거래건수 랭킹. recent 와 같은 캐시·워밍 패턴.
+app.get("/api/lab/traded", async (c) => {
+  const dataset = c.req.query("dataset") ?? DEFAULT_DATASET;
+  const scope = c.req.query("scope") ?? "all";
+  const yyyymm = c.req.query("yyyymm") ?? curYmd();
+  const limit = Math.min(Math.max(Number(c.req.query("limit") ?? 100), 1), 300);
+  if (!getDataset(dataset)) return c.json({ error: `unknown dataset '${dataset}'` }, 400);
+  if (!RE_YMD.test(yyyymm)) return c.json({ error: "yyyymm(YYYYMM) 필요" }, 400);
+
+  const ttl = yyyymm >= curYmd() ? 25 * 3600 : 7 * 24 * 3600;
+  const key = `resp:lab:traded:v1:${dataset}:${scope}:${yyyymm}:${limit}`;
+  const payload = await cachedJson(c.env, key, ttl, async () => {
+    const codes = scope === "all" ? null : scopeCodes(scope);
+    const rows = await tradedComplexes(c.env, dataset, yyyymm, codes, limit);
+    return { dataset, yyyymm, scope, count: rows.length, complexes: rows };
+  });
+  const cc = yyyymm < curYmd() ? "public, max-age=21600" : "public, max-age=300";
+  return c.json(payload, 200, { "Cache-Control": cc });
+});
+
+// 데이터랩 허브 타일별 헤드라인 수치 — 당월·전국·매매. 싼 집계 + 워밍된 recent KV 재사용.
+app.get("/api/lab/summary", async (c) => {
+  const dataset = "aptTrade";
+  const scope = "all";
+  const yyyymm = c.req.query("yyyymm") ?? curYmd();
+  if (!RE_YMD.test(yyyymm)) return c.json({ error: "yyyymm(YYYYMM) 필요" }, 400);
+
+  const key = `resp:lab:summary:v1:${dataset}:${scope}:${yyyymm}`;
+  const payload = await cachedJson(c.env, key, yyyymm >= curYmd() ? 25 * 3600 : 7 * 24 * 3600, async () => {
+    const amt = "(CASE WHEN deal_amount>0 THEN deal_amount ELSE deposit END)";
+    const prevYm = shiftYmd(yyyymm, -1);
+    const agg = (ym: string) =>
+      c.env.DB.prepare(`SELECT COUNT(*) AS cnt, ROUND(AVG(${amt})) AS avg, MAX(${amt}) AS mx FROM transactions WHERE dataset=? AND deal_ymd=?`)
+        .bind(dataset, ym).first<{ cnt: number; avg: number | null; mx: number | null }>();
+    const [cur, prev, traded] = await Promise.all([
+      agg(yyyymm), agg(prevYm), tradedComplexes(c.env, dataset, yyyymm, null, 1),
+    ]);
+    const pct = (a: number, b: number | null | undefined) =>
+      b && b > 0 ? Math.round(((a - b) / b) * 1000) / 10 : null;
+
+    // 최고상승·최근하락 헤드라인: 워밍된 무날짜 recent KV 의 rise 최대/최소.
+    let maxRise: number | null = null, minRise: number | null = null;
+    const rec = await c.env.CACHE.get(`resp:recent:v3:${dataset}:${scope}:${yyyymm}::300`, "json") as { deals?: { rise?: number | null }[] } | null;
+    for (const d of rec?.deals ?? []) {
+      if (typeof d.rise === "number") {
+        if (maxRise === null || d.rise > maxRise) maxRise = d.rise;
+        if (minRise === null || d.rise < minRise) minRise = d.rise;
+      }
+    }
+
+    return {
+      yyyymm,
+      top: { amount: cur?.mx ?? 0 },
+      rise: { pct: maxRise },
+      decline: { pct: minRise },
+      "hot-complex": { count: traded[0]?.count ?? 0 },
+      volume: { count: cur?.cnt ?? 0, deltaPct: pct(cur?.cnt ?? 0, prev?.cnt) },
+      volatility: { avg: cur?.avg ?? 0, deltaPct: pct(cur?.avg ?? 0, prev?.avg) },
+    };
+  });
+  const cc = yyyymm < curYmd() ? "public, max-age=21600" : "public, max-age=300";
   return c.json(payload, 200, { "Cache-Control": cc });
 });
 
@@ -796,7 +861,15 @@ async function warmCore(): Promise<void> {
       for (const s of ["all", "seoul"])
         paths.push(`/api/recent?dataset=${ds}&scope=${s}&yyyymm=${ym}&limit=300&date=${d}`);
     }
+    // 데이터랩 랭킹 소스(당월): 무날짜 recent(최고가·최고상승·최근하락 재정렬용) + 많이산단지.
+    const labYm = months[0];
+    for (const s of ["all", "seoul"]) {
+      paths.push(`/api/recent?dataset=${ds}&scope=${s}&yyyymm=${labYm}&limit=300`);
+      paths.push(`/api/lab/traded?dataset=${ds}&scope=${s}&yyyymm=${labYm}&limit=100`);
+    }
   }
+  // 데이터랩 허브 요약(매매·전국·당월) — recent KV 가 먼저 데워진 뒤라야 rise/decline 채워짐.
+  paths.push(`/api/lab/summary?yyyymm=${months[0]}`);
   // 코어는 양 레이어 확보: 워커 KV(글로벌 바닥, CDN evict 돼도 ~55ms) + Vercel CDN(핫 ~15ms).
   // ⚠️ 프록시 고동시성 워밍은 KV 쓰기(waitUntil)를 드롭함 → KV 는 워커직결로 별도 워밍.
   await warmPaths(paths, WORKER_BASE);
@@ -808,7 +881,9 @@ async function warmCore(): Promise<void> {
 
 // SSR HTML 라우트(Vercel ISR 전용 — 워커는 HTML 미서빙). 데이터 워밍 직후 호출해야
 // 페이지 재생성이 신선한 KV 를 끌어온다. src/app/(app)/*/page.tsx 라우트와 1:1.
-const SSR_PAGES = ["/", "/today", "/stats", "/rent", "/presale", "/map", "/complex"];
+const SSR_PAGES = ["/", "/today", "/stats", "/rent", "/presale", "/map", "/complex",
+  // 데이터랩 허브(정적) + 실데이터 지표 페이지(ISR — 데이터 워밍 직후 재생성)
+  "/lab", "/lab/top", "/lab/rise", "/lab/decline", "/lab/hot-complex"];
 
 // ⚠️ Vercel ISR 의 RSC 페이로드는 HTML 과 별도 캐시 엔트리(RSC 헤더로 vary). 날짜 클릭=soft-nav
 //    은 RSC 만 받으므로 HTML 만 구우면 RSC MISS 콜드(실측 741ms). HTML·RSC 둘 다 굽는다.

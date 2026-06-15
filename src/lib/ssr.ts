@@ -101,3 +101,75 @@ export async function ssrTodayDeals(
     return { deals: null, latest: null };
   }
 }
+
+// 데이터랩 랭킹 소스 — 무날짜 recent(당월 top-300, rise/추이 포함). 최고가·최고상승·최근하락이
+// 이 한 응답을 메트릭별로 재정렬해 쓴다(cron 으로 워밍 → 엣지 HIT).
+export async function ssrLabRecent(
+  dataset = "aptTrade",
+  scope = "all",
+  yyyymm?: string,
+): Promise<Transaction[] | null> {
+  try {
+    const ym = yyyymm ?? kstYmd();
+    const r = await fetch(
+      `${WORKER}/api/recent?dataset=${dataset}&scope=${encodeURIComponent(scope)}&yyyymm=${ym}&limit=300`,
+      { next: { revalidate: 1800 } },
+    );
+    if (!r.ok) return null;
+    const d = (await r.json()) as { deals?: Transaction[] };
+    return d.deals ?? null;
+  } catch {
+    return null;
+  }
+}
+
+export type TradedComplex = {
+  aptName: string;
+  sggCd: string;
+  umdNm: string | null;
+  count: number;
+  avgAmount: number;
+  maxAmount: number;
+  lastDate: string;
+};
+
+// 데이터랩 "많이산단지" — 당월·스코프 단지별 거래건수 랭킹.
+export async function ssrTraded(
+  dataset = "aptTrade",
+  scope = "all",
+  yyyymm?: string,
+): Promise<TradedComplex[] | null> {
+  try {
+    const ym = yyyymm ?? kstYmd();
+    const r = await fetch(
+      `${WORKER}/api/lab/traded?dataset=${dataset}&scope=${encodeURIComponent(scope)}&yyyymm=${ym}&limit=100`,
+      { next: { revalidate: 1800 } },
+    );
+    if (!r.ok) return null;
+    const d = (await r.json()) as { complexes?: TradedComplex[] };
+    return d.complexes ?? null;
+  } catch {
+    return null;
+  }
+}
+
+// 데이터랩 허브 타일별 헤드라인 수치(당월·전국·매매).
+export type LabSummary = {
+  yyyymm: string;
+  top: { amount: number };
+  rise: { pct: number | null };
+  decline: { pct: number | null };
+  "hot-complex": { count: number };
+  volume: { count: number; deltaPct: number | null };
+  volatility: { avg: number; deltaPct: number | null };
+};
+export async function ssrLabSummary(yyyymm?: string): Promise<LabSummary | null> {
+  try {
+    const ym = yyyymm ?? kstYmd();
+    const r = await fetch(`${WORKER}/api/lab/summary?yyyymm=${ym}`, { next: { revalidate: 1800 } });
+    if (!r.ok) return null;
+    return (await r.json()) as LabSummary;
+  } catch {
+    return null;
+  }
+}

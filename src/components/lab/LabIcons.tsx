@@ -3,8 +3,8 @@
 import type { ReactElement } from "react";
 
 const base = {
-  width: 22,
-  height: 22,
+  width: 30,
+  height: 30,
   viewBox: "0 0 24 24",
   fill: "none",
   stroke: "currentColor",

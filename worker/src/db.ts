@@ -155,6 +155,48 @@ export async function latestDealDateInMonth(
   return row?.d ?? null;
 }
 
+// 데이터랩 "많이산단지" — 월·스코프 내 단지별 거래건수 랭킹(GROUP BY apt_name, sgg_cd).
+// 거래량 많은 순, 동률이면 최고가 순. 평균/최고가/마지막 거래일도 함께.
+export type TradedComplex = {
+  aptName: string;
+  sggCd: string;
+  umdNm: string | null;
+  count: number;
+  avgAmount: number; // 만원
+  maxAmount: number; // 만원
+  lastDate: string;
+};
+export async function tradedComplexes(
+  env: Env,
+  dataset: string,
+  dealYmd: string,
+  codes: string[] | null,
+  limit: number,
+): Promise<TradedComplex[]> {
+  const amt = "(CASE WHEN deal_amount>0 THEN deal_amount ELSE deposit END)";
+  let sql =
+    `SELECT apt_name, sgg_cd, MAX(umd_nm) AS umd_nm, COUNT(*) AS cnt, ` +
+    `ROUND(AVG(${amt})) AS avg_amt, MAX(${amt}) AS max_amt, MAX(deal_date) AS last_date ` +
+    `FROM transactions WHERE dataset=? AND deal_ymd=?`;
+  const binds: unknown[] = [dataset, dealYmd];
+  if (codes && codes.length > 0) {
+    sql += ` AND sgg_cd IN (${codes.map(() => "?").join(",")})`;
+    binds.push(...codes);
+  }
+  sql += ` GROUP BY apt_name, sgg_cd ORDER BY cnt DESC, max_amt DESC LIMIT ?`;
+  binds.push(limit);
+  const { results } = await env.DB.prepare(sql).bind(...binds).all();
+  return (results as Record<string, unknown>[]).map((r) => ({
+    aptName: String(r.apt_name ?? ""),
+    sggCd: String(r.sgg_cd ?? ""),
+    umdNm: (r.umd_nm as string | null) ?? null,
+    count: Number(r.cnt ?? 0),
+    avgAmount: Number(r.avg_amt ?? 0),
+    maxAmount: Number(r.max_amt ?? 0),
+    lastDate: String(r.last_date ?? ""),
+  }));
+}
+
 // 단지별 직전(이번 달 이전) 최고가 + 마지막 거래일 — 오늘의 실거래 게임화용.
 // keys: "sgg_cd|apt_name" 형태. 결과 Map 동일 키.
 // 5자리 숫자 시군구 코드만 골라 SQL IN 리터럴로 생성(바인드 변수 절약·인젝션 안전).

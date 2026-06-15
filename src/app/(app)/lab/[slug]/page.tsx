@@ -1,14 +1,19 @@
-// 데이터랩 지표 상세(/lab/[slug]) — 아직 데이터가 없는 지표의 "준비 중" 상세.
-// href 가 매핑된 타일은 허브에서 기존 라우트로 바로 가므로 여기 오지 않는다(준비중 slug 만 정적 생성).
+// 데이터랩 지표 상세(/lab/[slug]).
+//  - view 가 있는 타일: 실거래 데이터 뷰(랭킹/많이산단지)를 SSR(ISR·엣지 HIT).
+//  - 그 외(데이터 없음): "준비 중" 안내 + 관련 메뉴.
 import { notFound } from "next/navigation";
 import Link from "next/link";
-import { LAB_TILE_BY_SLUG, LAB_SOON_SLUGS } from "@/components/lab/labTiles";
+import { LAB_TILE_BY_SLUG, LAB_DETAIL_SLUGS } from "@/components/lab/labTiles";
 import { LAB_ICONS } from "@/components/lab/LabIcons";
+import { LabRankingView } from "@/components/lab/LabRankingView";
+import { LabTradedView } from "@/components/lab/LabTradedView";
+import { ssrLabRecent, ssrTraded, kstYmd } from "@/lib/ssr";
 
-export const dynamicParams = false; // 정의된 준비중 slug 외엔 404
+export const revalidate = 1800; // 데이터 뷰 30분(cron 워밍이 재생성 흡수). 준비중 페이지는 정적.
+export const dynamicParams = false; // 정의된 slug 외엔 404
 
 export function generateStaticParams() {
-  return LAB_SOON_SLUGS.map((slug) => ({ slug }));
+  return LAB_DETAIL_SLUGS.map((slug) => ({ slug }));
 }
 
 export async function generateMetadata({ params }: { params: Promise<{ slug: string }> }) {
@@ -22,6 +27,18 @@ export default async function Page({ params }: { params: Promise<{ slug: string 
   const t = LAB_TILE_BY_SLUG[(await params).slug];
   if (!t) notFound();
 
+  // 실거래 데이터 뷰
+  if (t.view) {
+    const ym = kstYmd();
+    if (t.view === "traded") {
+      const complexes = (await ssrTraded("aptTrade", "all", ym)) ?? [];
+      return <LabTradedView complexes={complexes} label={t.label} desc={t.desc} color={t.color} yyyymm={ym} />;
+    }
+    const deals = (await ssrLabRecent("aptTrade", "all", ym)) ?? [];
+    return <LabRankingView deals={deals} view={t.view} label={t.label} desc={t.desc} color={t.color} yyyymm={ym} />;
+  }
+
+  // 데이터 미보유 — 준비 중 안내
   return (
     <div className="mx-auto w-[92%] max-w-[680px] px-2 py-10">
       <Link href="/lab" className="inline-flex items-center gap-1 text-sm text-slate-400 transition hover:text-slate-200">
