@@ -7,7 +7,9 @@ import { LAB_TILE_BY_SLUG, LAB_DETAIL_SLUGS } from "@/components/lab/labTiles";
 import { LAB_ICONS } from "@/components/lab/LabIcons";
 import { LabRankingView } from "@/components/lab/LabRankingView";
 import { LabTradedView } from "@/components/lab/LabTradedView";
-import { ssrLabRecent, ssrTraded, kstYmd } from "@/lib/ssr";
+import { LabInvestView } from "@/components/lab/LabInvestView";
+import { LabPresaleView } from "@/components/lab/LabPresaleView";
+import { ssrLabRecent, ssrTraded, ssrInvest, ssrPresale, kstYmd } from "@/lib/ssr";
 
 export const revalidate = 1800; // 데이터 뷰 30분(cron 워밍이 재생성 흡수). 준비중 페이지는 정적.
 export const dynamicParams = false; // 정의된 slug 외엔 404
@@ -33,6 +35,15 @@ export default async function Page({ params }: { params: Promise<{ slug: string 
     if (t.view === "traded") {
       const complexes = (await ssrTraded("aptTrade", "all", ym)) ?? [];
       return <LabTradedView complexes={complexes} label={t.label} desc={t.desc} color={t.color} yyyymm={ym} />;
+    }
+    if (t.view === "invest-gap" || t.view === "invest-yield") {
+      const metric = t.view === "invest-gap" ? "gap" : "yield";
+      const complexes = (await ssrInvest(metric, "all", ym)) ?? [];
+      return <LabInvestView complexes={complexes} metric={metric} label={t.label} desc={t.desc} color={t.color} yyyymm={ym} />;
+    }
+    if (t.view === "presale") {
+      const regions = (await ssrPresale("all", ym)) ?? [];
+      return <LabPresaleView regions={regions} label={t.label} desc={t.desc} color={t.color} yyyymm={ym} />;
     }
     const deals = (await ssrLabRecent("aptTrade", "all", ym)) ?? [];
     return <LabRankingView deals={deals} view={t.view} label={t.label} desc={t.desc} color={t.color} yyyymm={ym} />;

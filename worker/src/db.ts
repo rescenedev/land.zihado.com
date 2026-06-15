@@ -197,6 +197,118 @@ export async function tradedComplexes(
   }));
 }
 
+// 데이터랩 갭투자/월세수익 — 단지단위 매매 ⨝ 전월세. 같은 달·단지에 둘 다 거래된 곳만.
+//  gap:   매매 평균 − 전세 평균(보증금) = 투자금. 작은 순(투자 효율) 정렬.
+//  yield: 월세*12 / 매매 평균 = 연환산 수익률(%). 높은 순 정렬.
+export type InvestComplex = {
+  aptName: string;
+  sggCd: string;
+  umdNm: string | null;
+  sale: number; // 매매 평균(만원)
+  ref: number; // gap=전세 평균(만원), yield=월세 평균(만원)
+  value: number; // gap=갭(만원), yield=수익률(%, 소수1)
+};
+export async function investComplexes(
+  env: Env,
+  metric: "gap" | "yield",
+  dealYmd: string,
+  codes: string[] | null,
+  limit: number,
+): Promise<InvestComplex[]> {
+  const scope = codes && codes.length > 0
+    ? ` AND sgg_cd IN (${codes.map(() => "?").join(",")})`
+    : "";
+  const binds: unknown[] = [];
+  // sale CTE
+  binds.push(dealYmd);
+  if (scope) binds.push(...codes!);
+  // rent CTE
+  binds.push(dealYmd);
+  if (scope) binds.push(...codes!);
+
+  const sale =
+    `sale AS (SELECT apt_name, sgg_cd, MAX(umd_nm) AS umd_nm, ROUND(AVG(deal_amount)) AS av, COUNT(*) AS n ` +
+    `FROM transactions WHERE dataset='aptTrade' AND deal_ymd=?${scope} AND deal_amount>0 GROUP BY apt_name, sgg_cd)`;
+
+  let sql: string;
+  if (metric === "gap") {
+    sql =
+      `WITH ${sale}, ` +
+      `rent AS (SELECT apt_name, sgg_cd, ROUND(AVG(deposit)) AS jeonse ` +
+      `FROM transactions WHERE dataset='aptRent' AND deal_ymd=?${scope} AND monthly_rent=0 AND deposit>0 GROUP BY apt_name, sgg_cd) ` +
+      `SELECT s.apt_name, s.sgg_cd, s.umd_nm, s.av AS sale, r.jeonse AS ref, (s.av - r.jeonse) AS value ` +
+      `FROM sale s JOIN rent r ON s.apt_name=r.apt_name AND s.sgg_cd=r.sgg_cd ` +
+      `WHERE s.av > r.jeonse ORDER BY value ASC LIMIT ?`;
+  } else {
+    sql =
+      `WITH ${sale}, ` +
+      `wol AS (SELECT apt_name, sgg_cd, ROUND(AVG(monthly_rent)) AS rent ` +
+      `FROM transactions WHERE dataset='aptRent' AND deal_ymd=?${scope} AND monthly_rent>0 GROUP BY apt_name, sgg_cd) ` +
+      `SELECT s.apt_name, s.sgg_cd, s.umd_nm, s.av AS sale, w.rent AS ref, ` +
+      `ROUND(w.rent*12.0/s.av*1000)/10.0 AS value ` +
+      `FROM sale s JOIN wol w ON s.apt_name=w.apt_name AND s.sgg_cd=w.sgg_cd ` +
+      `WHERE s.av > 0 ORDER BY value DESC LIMIT ?`;
+  }
+  binds.push(limit);
+  const { results } = await env.DB.prepare(sql).bind(...binds).all();
+  return (results as Record<string, unknown>[]).map((r) => ({
+    aptName: String(r.apt_name ?? ""),
+    sggCd: String(r.sgg_cd ?? ""),
+    umdNm: (r.umd_nm as string | null) ?? null,
+    sale: Number(r.sale ?? 0),
+    ref: Number(r.ref ?? 0),
+    value: Number(r.value ?? 0),
+  }));
+}
+
+// 데이터랩 분양가비교 — 지역(시군구)단위 분양권 평단가 vs 아파트 매매 평단가.
+// 평단가 = 만원/m². diff% = (분양권 − 매매)/매매. 표본 충분한 지역만.
+export type PresaleRegion = {
+  sggCd: string;
+  silvPpa: number; // 분양권 평단가(만원/평)
+  salePpa: number; // 매매 평단가(만원/평)
+  silvN: number;
+  saleN: number;
+  diffPct: number; // (분양권-매매)/매매 * 100
+};
+export async function presaleCompareRegions(
+  env: Env,
+  dealYmd: string,
+  codes: string[] | null,
+  limit: number,
+): Promise<PresaleRegion[]> {
+  // 평단가: 만원/m² → 평(3.305785 m²)당. AVG 는 area>0 행만(CASE 가 null 반환 시 무시).
+  const ppa = (ds: string) =>
+    `AVG(CASE WHEN dataset='${ds}' AND area>0 AND deal_amount>0 THEN deal_amount*3.305785/area END)`;
+  let sql =
+    `SELECT sgg_cd, ` +
+    `ROUND(${ppa("silvTrade")}) AS silv_ppa, ROUND(${ppa("aptTrade")}) AS sale_ppa, ` +
+    `SUM(CASE WHEN dataset='silvTrade' THEN 1 ELSE 0 END) AS silv_n, ` +
+    `SUM(CASE WHEN dataset='aptTrade' THEN 1 ELSE 0 END) AS sale_n ` +
+    `FROM transactions WHERE deal_ymd=? AND dataset IN ('silvTrade','aptTrade')`;
+  const binds: unknown[] = [dealYmd];
+  if (codes && codes.length > 0) {
+    sql += ` AND sgg_cd IN (${codes.map(() => "?").join(",")})`;
+    binds.push(...codes);
+  }
+  sql += ` GROUP BY sgg_cd HAVING silv_n >= 3 AND sale_n >= 5 AND silv_ppa > 0 AND sale_ppa > 0 ` +
+    `ORDER BY silv_n DESC LIMIT ?`;
+  binds.push(limit);
+  const { results } = await env.DB.prepare(sql).bind(...binds).all();
+  return (results as Record<string, unknown>[]).map((r) => {
+    const silv = Number(r.silv_ppa ?? 0);
+    const sale = Number(r.sale_ppa ?? 0);
+    return {
+      sggCd: String(r.sgg_cd ?? ""),
+      silvPpa: silv,
+      salePpa: sale,
+      silvN: Number(r.silv_n ?? 0),
+      saleN: Number(r.sale_n ?? 0),
+      diffPct: sale > 0 ? Math.round(((silv - sale) / sale) * 1000) / 10 : 0,
+    };
+  });
+}
+
 // 단지별 직전(이번 달 이전) 최고가 + 마지막 거래일 — 오늘의 실거래 게임화용.
 // keys: "sgg_cd|apt_name" 형태. 결과 Map 동일 키.
 // 5자리 숫자 시군구 코드만 골라 SQL IN 리터럴로 생성(바인드 변수 절약·인젝션 안전).

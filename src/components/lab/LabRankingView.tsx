@@ -1,10 +1,14 @@
+"use client";
+
 // 데이터랩 랭킹 뷰 — 최고가/최고상승/최근하락. 무날짜 recent(당월 top-300) 한 응답을
-// 메트릭별로 재정렬해 렌더. 서버컴포넌트(스파크라인만 클라 아일랜드) → ISR·엣지 HIT.
+// 메트릭별로 재정렬해 렌더. 카드 클릭 시 단지 상세(ComplexDetail) 모달.
+import { useMemo, useState } from "react";
 import Link from "next/link";
 import type { Transaction } from "@/lib/api";
 import { formatDeal, pyeong } from "@/lib/format";
 import { ALL_DISTRICTS } from "@/lib/regions";
 import { Sparkline } from "@/components/Sparkline";
+import { ComplexDetail } from "@/components/ComplexDetail";
 import type { LabView } from "./labTiles";
 
 const regionName = (sggCd: string) =>
@@ -28,6 +32,7 @@ export function LabRankingView({
   desc,
   color,
   yyyymm,
+  dataset = "aptTrade",
 }: {
   deals: Transaction[];
   view: LabView;
@@ -35,8 +40,10 @@ export function LabRankingView({
   desc: string;
   color: string;
   yyyymm: string;
+  dataset?: string;
 }) {
-  const sorted = sortByMetric(deals, view).slice(0, 100);
+  const [selected, setSelected] = useState<{ region: string; apt: string; umdNm?: string; jibun?: string } | null>(null);
+  const sorted = useMemo(() => sortByMetric(deals, view).slice(0, 100), [deals, view]);
   const ym = `${yyyymm.slice(0, 4)}.${yyyymm.slice(4, 6)}`;
 
   return (
@@ -59,50 +66,64 @@ export function LabRankingView({
             const tr = (tx.trend ?? []).filter((v) => v > 0);
             const up = (tx.rise ?? 0) >= 0;
             return (
-              <li
-                key={`${tx.id ?? ""}-${tx.aptName}-${i}`}
-                className="flex items-center gap-3 rounded-xl border border-slate-800 bg-[#111a2e] px-4 py-3"
-              >
-                <span
-                  className="w-7 shrink-0 text-center text-sm font-bold tabular-nums"
-                  style={{ color: i < 3 ? color : "#64748b" }}
+              <li key={`${tx.id ?? ""}-${tx.aptName}-${i}`}>
+                <button
+                  onClick={() => setSelected({ region: tx.sggCd ?? "", apt: tx.aptName, umdNm: tx.umdNm, jibun: tx.jibun })}
+                  className="flex w-full items-center gap-3 rounded-xl border border-slate-800 bg-[#111a2e] px-4 py-3 text-left transition hover:border-blue-500/60 hover:bg-[#13203a]"
                 >
-                  {i + 1}
-                </span>
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center justify-between gap-3">
-                    <span className="truncate font-semibold text-slate-100">{tx.aptName}</span>
-                    <span className="shrink-0 text-base font-extrabold tracking-tight text-blue-400">
-                      {formatDeal(tx)}
-                    </span>
-                  </div>
-                  <div className="mt-0.5 flex items-center justify-between gap-2">
-                    <span className="truncate text-xs text-slate-400">
-                      {regionName(tx.sggCd ?? "")} {tx.umdNm} · {pyeong(tx.area)}평 · {tx.floor}층 · {tx.dealDate.slice(5)}
-                    </span>
-                    {typeof tx.rise === "number" && (
-                      <span className={`shrink-0 text-[11px] font-semibold ${tx.rise >= 0 ? "text-rose-400" : "text-blue-400"}`}>
-                        {tx.rise >= 0 ? "▲" : "▼"} {tx.rise >= 0 ? "+" : ""}{tx.rise}%
+                  <span
+                    className="w-7 shrink-0 text-center text-sm font-bold tabular-nums"
+                    style={{ color: i < 3 ? color : "#64748b" }}
+                  >
+                    {i + 1}
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="truncate font-semibold text-slate-100">{tx.aptName}</span>
+                      <span className="shrink-0 text-base font-extrabold tracking-tight text-blue-400">
+                        {formatDeal(tx)}
                       </span>
-                    )}
+                    </div>
+                    <div className="mt-0.5 flex items-center justify-between gap-2">
+                      <span className="truncate text-xs text-slate-400">
+                        {regionName(tx.sggCd ?? "")} {tx.umdNm} · {pyeong(tx.area)}평 · {tx.floor}층 · {tx.dealDate.slice(5)}
+                      </span>
+                      {typeof tx.rise === "number" && (
+                        <span className={`shrink-0 text-[11px] font-semibold ${tx.rise >= 0 ? "text-rose-400" : "text-blue-400"}`}>
+                          {tx.rise >= 0 ? "▲" : "▼"} {tx.rise >= 0 ? "+" : ""}{tx.rise}%
+                        </span>
+                      )}
+                    </div>
                   </div>
-                </div>
-                {tr.length >= 2 && (
-                  <div className="hidden w-[120px] shrink-0 sm:block">
-                    <Sparkline
-                      values={tr}
-                      width={120}
-                      height={30}
-                      responsive
-                      stroke={up ? "#f43f5e" : "#60a5fa"}
-                      fill={up ? "rgba(244,63,94,0.10)" : "rgba(96,165,250,0.10)"}
-                    />
-                  </div>
-                )}
+                  {tr.length >= 2 && (
+                    <div className="hidden w-[120px] shrink-0 sm:block">
+                      <Sparkline
+                        values={tr}
+                        width={120}
+                        height={30}
+                        responsive
+                        stroke={up ? "#f43f5e" : "#60a5fa"}
+                        fill={up ? "rgba(244,63,94,0.10)" : "rgba(96,165,250,0.10)"}
+                      />
+                    </div>
+                  )}
+                </button>
               </li>
             );
           })}
         </ol>
+      )}
+
+      {selected && (
+        <ComplexDetail
+          region={selected.region}
+          apt={selected.apt}
+          umdNm={selected.umdNm}
+          jibun={selected.jibun}
+          yyyymm={yyyymm}
+          dataset={dataset}
+          onClose={() => setSelected(null)}
+        />
       )}
     </div>
   );

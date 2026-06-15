@@ -22,6 +22,8 @@ import {
   recentDeals,
   latestDealDateInMonth,
   tradedComplexes,
+  investComplexes,
+  presaleCompareRegions,
   aptPriorStats,
   aptMonthlySeries,
   rebuildAgg,
@@ -365,6 +367,43 @@ app.get("/api/lab/traded", async (c) => {
     const codes = scope === "all" ? null : scopeCodes(scope);
     const rows = await tradedComplexes(c.env, dataset, yyyymm, codes, limit);
     return { dataset, yyyymm, scope, count: rows.length, complexes: rows };
+  });
+  const cc = yyyymm < curYmd() ? "public, max-age=21600" : "public, max-age=300";
+  return c.json(payload, 200, { "Cache-Control": cc });
+});
+
+// 데이터랩 갭투자(metric=gap) / 월세수익(metric=yield) — 단지단위 매매⨝전월세.
+app.get("/api/lab/invest", async (c) => {
+  const metric = c.req.query("metric") === "yield" ? "yield" : "gap";
+  const scope = c.req.query("scope") ?? "all";
+  const yyyymm = c.req.query("yyyymm") ?? curYmd();
+  const limit = Math.min(Math.max(Number(c.req.query("limit") ?? 100), 1), 300);
+  if (!RE_YMD.test(yyyymm)) return c.json({ error: "yyyymm(YYYYMM) 필요" }, 400);
+
+  const ttl = yyyymm >= curYmd() ? 25 * 3600 : 7 * 24 * 3600;
+  const key = `resp:lab:invest:v1:${metric}:${scope}:${yyyymm}:${limit}`;
+  const payload = await cachedJson(c.env, key, ttl, async () => {
+    const codes = scope === "all" ? null : scopeCodes(scope);
+    const rows = await investComplexes(c.env, metric, yyyymm, codes, limit);
+    return { metric, yyyymm, scope, count: rows.length, complexes: rows };
+  });
+  const cc = yyyymm < curYmd() ? "public, max-age=21600" : "public, max-age=300";
+  return c.json(payload, 200, { "Cache-Control": cc });
+});
+
+// 데이터랩 분양가비교 — 지역단위 분양권 평단가 vs 매매 평단가.
+app.get("/api/lab/presale", async (c) => {
+  const scope = c.req.query("scope") ?? "all";
+  const yyyymm = c.req.query("yyyymm") ?? curYmd();
+  const limit = Math.min(Math.max(Number(c.req.query("limit") ?? 60), 1), 300);
+  if (!RE_YMD.test(yyyymm)) return c.json({ error: "yyyymm(YYYYMM) 필요" }, 400);
+
+  const ttl = yyyymm >= curYmd() ? 25 * 3600 : 7 * 24 * 3600;
+  const key = `resp:lab:presale:v1:${scope}:${yyyymm}:${limit}`;
+  const payload = await cachedJson(c.env, key, ttl, async () => {
+    const codes = scope === "all" ? null : scopeCodes(scope);
+    const regions = await presaleCompareRegions(c.env, yyyymm, codes, limit);
+    return { yyyymm, scope, count: regions.length, regions };
   });
   const cc = yyyymm < curYmd() ? "public, max-age=21600" : "public, max-age=300";
   return c.json(payload, 200, { "Cache-Control": cc });
@@ -868,8 +907,13 @@ async function warmCore(): Promise<void> {
       paths.push(`/api/lab/traded?dataset=${ds}&scope=${s}&yyyymm=${labYm}&limit=100`);
     }
   }
-  // 데이터랩 허브 요약(매매·전국·당월) — recent KV 가 먼저 데워진 뒤라야 rise/decline 채워짐.
-  paths.push(`/api/lab/summary?yyyymm=${months[0]}`);
+  // 데이터랩 투자지표(매매⨝전월세·분양권 — 데이터셋 무관 단일 경로) + 허브 요약.
+  const labYm = months[0];
+  paths.push(`/api/lab/invest?metric=gap&scope=all&yyyymm=${labYm}&limit=100`);
+  paths.push(`/api/lab/invest?metric=yield&scope=all&yyyymm=${labYm}&limit=100`);
+  paths.push(`/api/lab/presale?scope=all&yyyymm=${labYm}&limit=60`);
+  // recent KV 가 먼저 데워진 뒤라야 rise/decline 채워짐.
+  paths.push(`/api/lab/summary?yyyymm=${labYm}`);
   // 코어는 양 레이어 확보: 워커 KV(글로벌 바닥, CDN evict 돼도 ~55ms) + Vercel CDN(핫 ~15ms).
   // ⚠️ 프록시 고동시성 워밍은 KV 쓰기(waitUntil)를 드롭함 → KV 는 워커직결로 별도 워밍.
   await warmPaths(paths, WORKER_BASE);
@@ -883,7 +927,8 @@ async function warmCore(): Promise<void> {
 // 페이지 재생성이 신선한 KV 를 끌어온다. src/app/(app)/*/page.tsx 라우트와 1:1.
 const SSR_PAGES = ["/", "/today", "/stats", "/rent", "/presale", "/map", "/complex",
   // 데이터랩 허브(정적) + 실데이터 지표 페이지(ISR — 데이터 워밍 직후 재생성)
-  "/lab", "/lab/top", "/lab/rise", "/lab/decline", "/lab/hot-complex"];
+  "/lab", "/lab/top", "/lab/rise", "/lab/decline", "/lab/hot-complex",
+  "/lab/gap", "/lab/rent-yield", "/lab/presale-compare"];
 
 // ⚠️ Vercel ISR 의 RSC 페이로드는 HTML 과 별도 캐시 엔트리(RSC 헤더로 vary). 날짜 클릭=soft-nav
 //    은 RSC 만 받으므로 HTML 만 구우면 RSC MISS 콜드(실측 741ms). HTML·RSC 둘 다 굽는다.

@@ -153,6 +153,58 @@ export async function ssrTraded(
   }
 }
 
+// 데이터랩 갭투자(metric=gap)/월세수익(metric=yield) — 단지단위 매매⨝전월세.
+export type InvestComplex = {
+  aptName: string;
+  sggCd: string;
+  umdNm: string | null;
+  sale: number; // 매매 평균(만원)
+  ref: number; // gap=전세 평균, yield=월세 평균(만원)
+  value: number; // gap=갭(만원), yield=수익률(%)
+};
+export async function ssrInvest(
+  metric: "gap" | "yield",
+  scope = "all",
+  yyyymm?: string,
+): Promise<InvestComplex[] | null> {
+  try {
+    const ym = yyyymm ?? kstYmd();
+    const r = await fetch(
+      `${WORKER}/api/lab/invest?metric=${metric}&scope=${encodeURIComponent(scope)}&yyyymm=${ym}&limit=100`,
+      { next: { revalidate: 1800 } },
+    );
+    if (!r.ok) return null;
+    const d = (await r.json()) as { complexes?: InvestComplex[] };
+    return d.complexes ?? null;
+  } catch {
+    return null;
+  }
+}
+
+// 데이터랩 분양가비교 — 지역단위 분양권 평단가 vs 매매 평단가.
+export type PresaleRegion = {
+  sggCd: string;
+  silvPpa: number;
+  salePpa: number;
+  silvN: number;
+  saleN: number;
+  diffPct: number;
+};
+export async function ssrPresale(scope = "all", yyyymm?: string): Promise<PresaleRegion[] | null> {
+  try {
+    const ym = yyyymm ?? kstYmd();
+    const r = await fetch(
+      `${WORKER}/api/lab/presale?scope=${encodeURIComponent(scope)}&yyyymm=${ym}&limit=60`,
+      { next: { revalidate: 1800 } },
+    );
+    if (!r.ok) return null;
+    const d = (await r.json()) as { regions?: PresaleRegion[] };
+    return d.regions ?? null;
+  } catch {
+    return null;
+  }
+}
+
 // 데이터랩 허브 타일별 헤드라인 수치(당월·전국·매매).
 export type LabSummary = {
   yyyymm: string;

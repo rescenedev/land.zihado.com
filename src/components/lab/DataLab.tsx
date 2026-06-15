@@ -52,9 +52,29 @@ export function DataLab({ summary }: { summary: LabSummary | null }) {
       <div className="border-t border-slate-800/80 pt-7">
         <ul className="grid grid-cols-2 gap-x-2 gap-y-7 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
           {LAB_TILES.map((t) => {
-            const href = t.href ?? `/lab/${t.slug}`;
-            const soon = !t.href && !t.view;
+            const soon = !t.href && !t.view; // 데이터 없음 → 회색·클릭불가
             const m = metricFor(t.slug, summary);
+
+            // 준비중: Link 아님(클릭불가) + 전체 회색 처리.
+            if (soon) {
+              return (
+                <li key={t.slug}>
+                  <div
+                    title={`${t.desc} (준비 중)`}
+                    aria-disabled="true"
+                    className="flex cursor-not-allowed flex-col items-center gap-2.5 rounded-2xl px-1.5 py-3 text-center opacity-45 grayscale"
+                  >
+                    <span className="flex h-[72px] w-[72px] items-center justify-center rounded-[20px] bg-slate-700/30 text-slate-500">
+                      {LAB_ICONS[t.icon]}
+                    </span>
+                    <span className="text-sm font-semibold leading-tight text-slate-400">{t.label}</span>
+                    <span className="text-xs text-slate-500">준비중</span>
+                  </div>
+                </li>
+              );
+            }
+
+            const href = t.href ?? `/lab/${t.slug}`;
             return (
               <li key={t.slug}>
                 <Link
@@ -68,19 +88,12 @@ export function DataLab({ summary }: { summary: LabSummary | null }) {
                     style={{ backgroundColor: `${t.color}1f`, color: t.color }}
                   >
                     {LAB_ICONS[t.icon]}
-                    {soon && (
-                      <span
-                        className="absolute -right-0.5 -top-0.5 h-2.5 w-2.5 rounded-full border-2 border-[#0b1120] bg-slate-500"
-                        aria-label="준비중"
-                      />
-                    )}
                   </span>
                   <span className="text-sm font-semibold leading-tight text-slate-100">{t.label}</span>
-                  {/* 하단 수치: 데이터 있으면 당월 헤드라인, 없으면 자리 유지용 점선 */}
                   {m ? (
                     <span className={`text-xs font-bold tabular-nums ${TONE[m.tone]}`}>{m.value}</span>
                   ) : (
-                    <span className="text-xs text-slate-600">{soon ? "준비중" : "·"}</span>
+                    <span className="text-xs text-slate-600">·</span>
                   )}
                 </Link>
               </li>

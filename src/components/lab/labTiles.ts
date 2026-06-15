@@ -3,7 +3,9 @@
 import type { LabIconKey } from "./LabIcons";
 
 // 실데이터로 구현된 지표 뷰 종류(실거래 기반). 그 외 타일은 href(기존 라우트) 또는 준비중.
-export type LabView = "ranking-top" | "ranking-rise" | "ranking-decline" | "traded";
+export type LabView =
+  | "ranking-top" | "ranking-rise" | "ranking-decline" | "traded"
+  | "invest-gap" | "invest-yield" | "presale";
 
 export type LabTile = {
   slug: string;
@@ -27,16 +29,16 @@ export const LAB_TILES: LabTile[] = [
   { slug: "supply-change", label: "매물증감", desc: "매물 수 증감 추이", icon: "supplyChange", color: "#10b981", related: [{ label: "통계", href: "/stats" }] },
   { slug: "hot-complex", label: "많이산단지", desc: "당월 거래건수가 가장 많은 단지 랭킹", icon: "hotComplex", color: "#0ea5e9", view: "traded" },
   { slug: "volume", label: "거래량", desc: "지역·기간별 거래량", icon: "volume", color: "#22c55e", href: "/stats" },
-  { slug: "gap", label: "갭투자", desc: "매매가 대비 전세가(갭) 분석", icon: "gap", color: "#eab308", related: [{ label: "전월세", href: "/rent" }] },
+  { slug: "gap", label: "갭투자", desc: "매매가 − 전세가 = 투자금이 적은 단지", icon: "gap", color: "#eab308", view: "invest-gap" },
   { slug: "sentiment", label: "매수심리", desc: "매수우위/매도우위 심리 지수", icon: "sentiment", color: "#ec4899", related: [{ label: "통계", href: "/stats" }] },
   { slug: "supply", label: "공급물량", desc: "지역별 입주·공급 물량", icon: "supply", color: "#14b8a6" },
   { slug: "unsold", label: "미분양", desc: "지역별 미분양 추이", icon: "unsold", color: "#94a3b8", related: [{ label: "분양권", href: "/presale" }] },
   { slug: "population", label: "인구변화", desc: "지역 인구·세대수 변화", icon: "population", color: "#3b82f6" },
-  { slug: "presale-compare", label: "분양가비교", desc: "분양가 대비 주변 시세 비교", icon: "presaleCompare", color: "#a855f7", href: "/presale" },
+  { slug: "presale-compare", label: "분양가비교", desc: "지역별 분양권 평단가 vs 아파트 매매 평단가", icon: "presaleCompare", color: "#a855f7", view: "presale" },
   { slug: "school", label: "학군비교", desc: "학군·학교 정보 비교", icon: "school", color: "#06b6d4" },
   { slug: "big-complex", label: "대단지", desc: "세대수 많은 대단지 랭킹", icon: "bigComplex", color: "#6366f1", related: [{ label: "단지 검색", href: "/complex" }] },
   { slug: "views", label: "조회수", desc: "많이 본 단지 랭킹", icon: "views", color: "#2563eb" },
-  { slug: "rent-yield", label: "월세수익", desc: "전월세 기반 월세 수익률", icon: "rentYield", color: "#f59e0b", href: "/rent" },
+  { slug: "rent-yield", label: "월세수익", desc: "월세×12 ÷ 매매가 = 연환산 수익률", icon: "rentYield", color: "#f59e0b", view: "invest-yield" },
   { slug: "shop", label: "상가통계", desc: "상업용 부동산 거래 통계", icon: "shop", color: "#0ea5e9" },
   { slug: "land", label: "토지통계", desc: "토지 실거래 통계", icon: "land", color: "#22c55e" },
 ];

@@ -1,9 +1,9 @@
 "use client";
 
-// 데이터랩 "많이산단지" — 당월·전국 단지별 거래건수 랭킹. 카드 클릭 시 단지 상세 모달.
+// 데이터랩 갭투자(gap)/월세수익(yield) — 단지단위 매매⨝전월세. 카드 클릭 시 단지 상세.
 import { useState } from "react";
 import Link from "next/link";
-import type { TradedComplex } from "@/lib/ssr";
+import type { InvestComplex } from "@/lib/ssr";
 import { formatAmountFull } from "@/lib/format";
 import { ALL_DISTRICTS } from "@/lib/regions";
 import { ComplexDetail } from "@/components/ComplexDetail";
@@ -11,24 +11,24 @@ import { ComplexDetail } from "@/components/ComplexDetail";
 const regionName = (sggCd: string) =>
   ALL_DISTRICTS.find((d) => d.code === sggCd)?.name ?? sggCd;
 
-export function LabTradedView({
+export function LabInvestView({
   complexes,
+  metric,
   label,
   desc,
   color,
   yyyymm,
-  dataset = "aptTrade",
 }: {
-  complexes: TradedComplex[];
+  complexes: InvestComplex[];
+  metric: "gap" | "yield";
   label: string;
   desc: string;
   color: string;
   yyyymm: string;
-  dataset?: string;
 }) {
   const [selected, setSelected] = useState<{ region: string; apt: string; umdNm?: string } | null>(null);
   const ym = `${yyyymm.slice(0, 4)}.${yyyymm.slice(4, 6)}`;
-  const maxCount = complexes[0]?.count ?? 1;
+  const isGap = metric === "gap";
 
   return (
     <div className="mx-auto w-[92%] max-w-[920px] px-2 py-8">
@@ -40,10 +40,14 @@ export function LabTradedView({
         <h1 className="text-2xl font-bold tracking-tight text-white">{label}</h1>
       </header>
       <p className="mb-1 text-sm text-slate-400">{desc}</p>
-      <p className="mb-5 text-xs text-slate-500">{ym} · 전국 · 아파트 매매 · 거래건수 상위 {complexes.length}단지</p>
+      <p className="mb-5 text-xs text-slate-500">
+        {ym} · 전국 · 같은 달 매매·{isGap ? "전세" : "월세"} 모두 거래된 단지 · {isGap ? "갭 적은" : "수익률 높은"} 순 {complexes.length}곳
+      </p>
 
       {complexes.length === 0 ? (
-        <div className="py-16 text-center text-slate-500">표시할 단지가 없습니다.</div>
+        <div className="py-16 text-center text-slate-500">
+          같은 달에 매매·{isGap ? "전세" : "월세"}가 함께 거래된 단지가 없습니다.
+        </div>
       ) : (
         <ol className="flex flex-col gap-2">
           {complexes.map((c, i) => (
@@ -61,20 +65,17 @@ export function LabTradedView({
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center justify-between gap-3">
                     <span className="truncate font-semibold text-slate-100">{c.aptName}</span>
-                    <span className="shrink-0 text-sm font-bold tabular-nums" style={{ color }}>
-                      {c.count}건
+                    <span className="shrink-0 text-base font-extrabold tracking-tight tabular-nums" style={{ color }}>
+                      {isGap ? `갭 ${formatAmountFull(c.value)}` : `${c.value}%`}
                     </span>
                   </div>
-                  <div className="mt-1 flex items-center justify-between gap-2">
+                  <div className="mt-0.5 flex items-center justify-between gap-2">
                     <span className="truncate text-xs text-slate-400">
-                      {regionName(c.sggCd)} {c.umdNm} · 평균 {formatAmountFull(c.avgAmount)} · 최고 {formatAmountFull(c.maxAmount)}
+                      {regionName(c.sggCd)} {c.umdNm}
                     </span>
-                  </div>
-                  <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-slate-800">
-                    <div
-                      className="h-full rounded-full"
-                      style={{ width: `${Math.max(6, (c.count / maxCount) * 100)}%`, backgroundColor: color }}
-                    />
+                    <span className="shrink-0 text-xs text-slate-400 tabular-nums">
+                      매매 {formatAmountFull(c.sale)} · {isGap ? "전세" : "월세"} {formatAmountFull(c.ref)}
+                    </span>
                   </div>
                 </div>
               </button>
@@ -89,7 +90,7 @@ export function LabTradedView({
           apt={selected.apt}
           umdNm={selected.umdNm}
           yyyymm={yyyymm}
-          dataset={dataset}
+          dataset="aptTrade"
           onClose={() => setSelected(null)}
         />
       )}
