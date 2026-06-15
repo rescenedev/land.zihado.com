@@ -15,6 +15,7 @@ const ALL_REGIONS: RegionHit[] = REGIONS.flatMap((r) =>
 const MENU_ITEMS: { href: string; label: string; kw: string }[] = [
   { href: "/", label: "대시보드", kw: "dashboard home 홈 메인" },
   { href: "/today", label: "오늘의 실거래", kw: "today 오늘 최근 recent" },
+  { href: "/lab", label: "데이터랩", kw: "lab datalab 데이터랩 스터디 지표 분석 study" },
   { href: "/complex", label: "단지 검색", kw: "complex apt 아파트 단지" },
   { href: "/stats", label: "통계", kw: "stats statistics 통계 분석" },
   { href: "/map", label: "지도", kw: "map 지도 맵" },

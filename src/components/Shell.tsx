@@ -9,6 +9,7 @@ export type NavItem = { href: string; label: string; locked?: boolean };
 const NAV_ITEMS: NavItem[] = [
   { href: "/", label: "대시보드" },
   { href: "/today", label: "오늘의 실거래" },
+  { href: "/lab", label: "데이터랩" },
   { href: "/complex", label: "단지 검색" },
   { href: "/stats", label: "통계" },
   { href: "/map", label: "지도" },
