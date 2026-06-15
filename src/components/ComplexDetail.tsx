@@ -69,11 +69,13 @@ export function ComplexDetail({
     return () => { alive = false; };
   }, [region, apt, umdNmProp, jibunProp]);
 
-  // 좌표 fallback: props 없을 때 deals 도착 후 지오코딩
+  // 좌표 fallback: 1차(props)가 좌표를 못 얻었고 deals 가 도착하면, 지번 있는 대표 거래로 보강.
+  // umdNm 은 있지만 jibun 이 없는 진입(데이터랩 많이산단지·투자 지표 등)도 여기서 자가 치유.
   useEffect(() => {
-    if (umdNmProp) return; // 위 effect가 처리
+    if (coord) return; // 이미 좌표 확보됨(1차 성공)
     if (deals.length === 0) return;
     const rep = deals.find((d) => d.jibun) ?? deals[0];
+    if (!rep?.jibun) return; // 지번 없으면 정확한 지오코딩 불가
     let alive = true;
     fetchCoord(region, rep.umdNm, rep.jibun, apt).then((c) => {
       if (!alive || !c) return;
@@ -84,7 +86,7 @@ export function ComplexDetail({
     return () => {
       alive = false;
     };
-  }, [deals, region, apt, umdNmProp]);
+  }, [coord, deals, region, apt]);
 
   // ESC 닫기
   useEffect(() => {
