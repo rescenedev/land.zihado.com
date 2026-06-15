@@ -252,7 +252,10 @@ export function TodayDeals({
                   const ym = ymdOfDate(date);
                   fetchComplexDeals(tx.sggCd ?? "", tx.aptName, shiftMonth(ym, -11), ym, dataset).catch(() => {});
                 }}
-                className="flex flex-col gap-1.5 rounded-xl border border-slate-800 bg-[#111a2e] px-4 py-3 text-left transition hover:border-blue-500/60 hover:bg-[#13203a]"
+                // content-visibility: 화면 밖 카드의 레이아웃/페인트를 건너뜀(300장 그리드의
+                // 날짜 전환 커밋 비용을 급감 → "불러오는 중" 플래시·스크롤 버벅임 제거).
+                // intrinsic-size 의 auto 키워드가 첫 렌더 실측 높이를 기억해 스크롤바 안정.
+                className="flex flex-col gap-1.5 rounded-xl border border-slate-800 bg-[#111a2e] px-4 py-3 text-left transition [contain-intrinsic-size:auto_132px] [content-visibility:auto] hover:border-blue-500/60 hover:bg-[#13203a]"
               >
                 <div className="flex items-center justify-between gap-3">
                   <span className="truncate font-semibold text-slate-100">{tx.aptName}</span>
