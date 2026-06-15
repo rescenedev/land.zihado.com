@@ -136,6 +136,25 @@ export async function recentDeals(
   return (results as unknown[]).map(rowToTx);
 }
 
+// 해당 월·스코프의 가장 최근 계약일(YYYY-MM-DD). 결과 없으면 null.
+// recent 가 빈 날(오늘=신고지연)일 때 "최신 실거래일" 점프 타깃을 같은 응답에 실어
+// SSR 의 별도 limit=1 프로브(직렬 워커 왕복)를 제거하기 위함.
+export async function latestDealDateInMonth(
+  env: Env,
+  dataset: string,
+  dealYmd: string,
+  codes: string[] | null
+): Promise<string | null> {
+  let sql = `SELECT MAX(deal_date) AS d FROM transactions WHERE dataset=? AND deal_ymd=?`;
+  const binds: unknown[] = [dataset, dealYmd];
+  if (codes && codes.length > 0) {
+    sql += ` AND sgg_cd IN (${codes.map(() => "?").join(",")})`;
+    binds.push(...codes);
+  }
+  const row = await env.DB.prepare(sql).bind(...binds).first<{ d: string | null }>();
+  return row?.d ?? null;
+}
+
 // 단지별 직전(이번 달 이전) 최고가 + 마지막 거래일 — 오늘의 실거래 게임화용.
 // keys: "sgg_cd|apt_name" 형태. 결과 Map 동일 키.
 // 5자리 숫자 시군구 코드만 골라 SQL IN 리터럴로 생성(바인드 변수 절약·인젝션 안전).

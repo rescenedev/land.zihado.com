@@ -20,6 +20,7 @@ import {
   putCoords,
   searchAptNames,
   recentDeals,
+  latestDealDateInMonth,
   aptPriorStats,
   aptMonthlySeries,
   rebuildAgg,
@@ -336,7 +337,9 @@ app.get("/api/recent", async (c) => {
       const trend = months.map((m) => sm?.get(m) ?? 0);
       return { ...d, prevMax, prevDate, rise, isHigh, isFirst: prevMax === 0, trend };
     });
-    const latest = enriched[0]?.dealDate ?? "";
+    // 결과가 비면(오늘=신고지연) 월·스코프 최신 계약일을 latest 로 — SSR 이 같은 응답에서
+    // 점프 타깃을 얻어 별도 limit=1 프로브(직렬 워커 왕복)를 안 타게 한다.
+    const latest = enriched[0]?.dealDate ?? (await latestDealDateInMonth(c.env, dataset, yyyymm, codes)) ?? "";
     return { dataset, yyyymm, scope, date: exactDate ?? null, latest, count: enriched.length, deals: enriched };
   });
   // 과거 확정일(exactDate)은 불변 → 장기 캐시(6h). 당월/최신은 짧게.

@@ -80,11 +80,13 @@ export async function ssrLatestDealDate(
   return (await probe(base)) ?? (await probe(prevYm(base)));
 }
 
+// deals 와 함께 latest(월·스코프 최신 계약일)도 반환 — 빈 날에도 워커가 latest 를 채워주므로
+// SSR 이 같은 응답에서 점프 타깃을 얻는다(별도 limit=1 프로브 = 직렬 워커 왕복 제거).
 export async function ssrTodayDeals(
   dataset = "aptTrade",
   scope = "all",
   date?: string
-): Promise<Transaction[] | null> {
+): Promise<{ deals: Transaction[] | null; latest: string | null }> {
   try {
     const day = date ?? kstDate();
     const ym = `${day.slice(0, 4)}${day.slice(5, 7)}`; // YYYY-MM-DD → YYYYMM
@@ -92,10 +94,10 @@ export async function ssrTodayDeals(
       `${WORKER}/api/recent?dataset=${dataset}&scope=${encodeURIComponent(scope)}&yyyymm=${ym}&limit=300&date=${day}`,
       { next: { revalidate: 1800 } }
     );
-    if (!r.ok) return null;
-    const d = (await r.json()) as { deals?: Transaction[] };
-    return d.deals ?? null;
+    if (!r.ok) return { deals: null, latest: null };
+    const d = (await r.json()) as { deals?: Transaction[]; latest?: string };
+    return { deals: d.deals ?? null, latest: d.latest || null };
   } catch {
-    return null;
+    return { deals: null, latest: null };
   }
 }
