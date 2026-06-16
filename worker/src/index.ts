@@ -1046,14 +1046,19 @@ async function warmCaches(env: Env): Promise<void> {
   await warmComplexes(env);
 }
 
+// 라이브 윈도우: 당월 + 전월. MOLIT 신고지연(법정 30일)으로 이 구간은 매일 거래가 늘어
+// 첫 스냅샷이 동결되면 안 됨 → force 재적재. 그 이전 월은 사실상 불변이라 멱등 신뢰(단락).
+const LIVE_WINDOW = 2;
 function buildBackfillJobs(months: number): BackfillJob[] {
   const ymds = recentMonths(months);
+  const live = new Set(recentMonths(LIVE_WINDOW));
   const datasets = enabledDatasets().map((d) => d.key);
   const jobs: BackfillJob[] = [];
   for (const sggCd of SGG_CODES) {
     jobs.push({ type: "complexes", sggCd });
     for (const dataset of datasets) {
-      for (const dealYmd of ymds) jobs.push({ type: "trades", sggCd, dataset, dealYmd });
+      for (const dealYmd of ymds)
+        jobs.push({ type: "trades", sggCd, dataset, dealYmd, force: live.has(dealYmd) });
     }
   }
   return jobs;

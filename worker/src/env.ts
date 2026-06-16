@@ -15,4 +15,5 @@ export type BackfillJob = {
   dataset?: string; // trades/warmcomplex 일 때 데이터셋 키
   dealYmd?: string; // trades/warmcomplex(=기준월) 일 때
   apt?: string; // warmcomplex 일 때 단지명
+  force?: boolean; // trades: isIngested 단락 무시하고 MOLIT 강제 재적재(라이브 윈도우 갱신용)
 };

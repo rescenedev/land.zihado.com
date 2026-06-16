@@ -23,18 +23,24 @@ export async function ensureMonth(
   env: Env,
   dataset: string,
   sggCd: string,
-  dealYmd: string
+  dealYmd: string,
+  force = false
 ): Promise<{ rows: Transaction[]; source: "kv" | "d1" | "molit" }> {
-  const kv = await getMonthKV(env, dataset, sggCd, dealYmd);
-  if (kv) return { rows: kv, source: "kv" };
+  // force=true: 라이브 윈도우(당월·전월) 갱신. MOLIT 실거래는 신고지연(법정 30일)으로
+  // 당월 데이터가 매일 늘어난다. KV/D1(첫 스냅샷) 단락을 건너뛰고 MOLIT 을 다시 긁어야
+  // "어제·오늘" 등 첫 적재 이후 신고분이 반영된다. (isIngested 가 영원히 true 라 단락되면 동결)
+  if (!force) {
+    const kv = await getMonthKV(env, dataset, sggCd, dealYmd);
+    if (kv) return { rows: kv, source: "kv" };
 
-  if (await isIngested(env, dataset, sggCd, dealYmd)) {
-    const rows = await queryMonth(env, dataset, sggCd, dealYmd);
-    await putMonthKV(env, dataset, sggCd, dealYmd, rows);
-    // self-heal: 과거 적재분이 region_month_agg 를 안 채웠던 케이스(overview 0건 버그) 복구.
-    // idempotent(ON CONFLICT) 라 이미 정상인 월은 같은 값으로 덮어쓸 뿐.
-    await upsertRegionAgg(env, dataset, sggCd, dealYmd, rows);
-    return { rows, source: "d1" };
+    if (await isIngested(env, dataset, sggCd, dealYmd)) {
+      const rows = await queryMonth(env, dataset, sggCd, dealYmd);
+      await putMonthKV(env, dataset, sggCd, dealYmd, rows);
+      // self-heal: 과거 적재분이 region_month_agg 를 안 채웠던 케이스(overview 0건 버그) 복구.
+      // idempotent(ON CONFLICT) 라 이미 정상인 월은 같은 값으로 덮어쓸 뿐.
+      await upsertRegionAgg(env, dataset, sggCd, dealYmd, rows);
+      return { rows, source: "d1" };
+    }
   }
 
   const rows = await fetchMonth(env.MOLIT_SERVICE_KEY, dataset, sggCd, dealYmd);
@@ -165,6 +171,6 @@ export async function handleJob(env: Env, job: BackfillJob): Promise<void> {
     return;
   }
   if (job.type === "trades" && job.dealYmd) {
-    await ensureMonth(env, job.dataset ?? DEFAULT_DATASET, job.sggCd, job.dealYmd);
+    await ensureMonth(env, job.dataset ?? DEFAULT_DATASET, job.sggCd, job.dealYmd, job.force ?? false);
   }
 }
