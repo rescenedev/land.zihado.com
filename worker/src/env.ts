@@ -7,6 +7,8 @@ export interface Env {
   VWORLD_KEY: string;
   VWORLD_DOMAIN?: string; // VWorld 등록 서비스URL (기본 land.zihado.com)
   BACKFILL_MONTHS: string;
+  TELEGRAM_BOT_TOKEN?: string; // 일일 적재 상태 알림용 (secret)
+  TELEGRAM_CHAT_ID?: string;   // 알림 수신 chat id (secret)
 }
 
 export type BackfillJob = {

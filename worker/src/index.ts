@@ -1104,6 +1104,39 @@ function monthsBetween(from: string, to: string): string[] {
   return out;
 }
 
+// 매일 10:00 KST(01:00 UTC) cron: 당월 적재 현황을 텔레그램 통지.
+// 09:30~09:42 적재 cron 직후 → "오늘 갱신됐는지"를 확인해 보고(미갱신=MOLIT 장애 의심).
+async function notifyDaily(env: Env): Promise<void> {
+  const token = env.TELEGRAM_BOT_TOKEN;
+  const chat = env.TELEGRAM_CHAT_ID;
+  if (!token || !chat) return;
+  const curM = curYmd();
+  const { results } = await env.DB.prepare(
+    `SELECT dataset, SUM(count) AS rows, MAX(ingested_at) AS last
+     FROM ingest_log WHERE deal_ymd=? AND status!='error' GROUP BY dataset`
+  ).bind(curM).all();
+  const rows = results as { dataset: string; rows: number; last: number }[];
+  const now = Date.now();
+  const DAY = 24 * 3600 * 1000;
+  const label: Record<string, string> = { aptTrade: "매매", aptRent: "전월세", silvTrade: "분양권" };
+  let freshest = 0;
+  const lines = rows.map((r) => {
+    freshest = Math.max(freshest, r.last);
+    const ageH = Math.round((now - r.last) / 3600000);
+    return `· ${label[r.dataset] ?? r.dataset}: ${Number(r.rows).toLocaleString()}건 (적재 ${ageH}h 전)`;
+  });
+  const updated = now - freshest < DAY;
+  const head = updated
+    ? `✅ landman 실거래 갱신됨 (${curM})`
+    : `⚠️ landman 미갱신 — MOLIT 장애 의심 (${curM})`;
+  const text = `${head}\n${lines.join("\n")}`;
+  await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ chat_id: chat, text }),
+  });
+}
+
 export default {
   fetch: app.fetch,
 
@@ -1136,6 +1169,8 @@ export default {
       ctx.waitUntil(warmRegionsPast(["aptRent", "silvTrade"]));
     } else if (event.cron === "42 0 * * *") {
       ctx.waitUntil(enqueueComplexWarm(env)); // 단지 상세 모달 KV 워밍(당월 단지 전부, 큐 분산)
+    } else if (event.cron === "0 1 * * *") {
+      ctx.waitUntil(notifyDaily(env)); // 10:00 KST: 당월 적재 현황 텔레그램 통지
     } else {
       ctx.waitUntil(enqueue(env, buildBackfillJobs(2)));
       ctx.waitUntil(warmCore());              // 대시보드/통계/오늘의실거래 전국·서울 30일
