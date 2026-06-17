@@ -68,9 +68,10 @@ function edgeTtl(url: string): number | null {
   return null;
 }
 
-// 응답 스키마 변경 시 bump → 기존 엣지 캐시 엔트리 자동 고아화(새 키로 슬림 응답 재캐시).
-// v2: Transaction.extra(원본 MOLIT 태그 중복) 응답 제외 — 레코드 ~2배 군살 제거.
-const CACHE_VERSION = "v2";
+// 응답 스키마/캐시 변경 시 bump → 기존 엣지 캐시 엔트리 자동 고아화(새 키로 재캐시).
+// v2: Transaction.extra 응답 제외(군살 제거).
+// v3: recent KV TTL 버그(당월 25h 동결) 수정 동반 — 복구 전 stale 엣지 응답 즉시 버스트.
+const CACHE_VERSION = "v3";
 
 app.use("*", async (c, next) => {
   if (c.req.method !== "GET") return next();
@@ -312,9 +313,11 @@ app.get("/api/recent", async (c) => {
   if (!getDataset(dataset)) return c.json({ error: `unknown dataset '${dataset}'` }, 400);
   if (!RE_YMD.test(yyyymm)) return c.json({ error: "yyyymm(YYYYMM) 필요" }, 400);
 
-  // KV 응답 캐시: 당월 10분 / exactDate(확정) 6시간 / 과거 7일
-  const recentTtl = exactDate ? 25 * 3600 : (yyyymm >= curYmd() ? 25 * 3600 : 7 * 24 * 3600);
-  const recentKey = `resp:recent:v3:${dataset}:${scope}:${yyyymm}:${exactDate ?? ""}:${limit}`; // v3: extra 군살 제거
+  // KV 응답 캐시: 당월(신고 계속 추가)=10분 / 과거월(확정·불변)=7일.
+  // yyyymm 은 exactDate 의 월로 이미 계산됨(위) → exactDate 라도 당월이면 짧게(오늘·최근일 신고지연 반영).
+  // ⚠️ 이전 버그: exactDate 면 무조건 25h → 당월 특정일(오늘 등) latest 포인터가 하루 동결됐음.
+  const recentTtl = yyyymm < curYmd() ? 7 * 24 * 3600 : 10 * 60;
+  const recentKey = `resp:recent:v4:${dataset}:${scope}:${yyyymm}:${exactDate ?? ""}:${limit}`; // v4: TTL 버그 수정 동반 버스트
   const payload = await cachedJson(c.env, recentKey, recentTtl, async () => {
     const codes = scope === "all" ? null : scopeCodes(scope);
     const deals = await recentDeals(c.env, dataset, yyyymm, codes, limit, exactDate);
@@ -436,7 +439,7 @@ app.get("/api/lab/summary", async (c) => {
 
     // 최고상승·최근하락 헤드라인: 워밍된 무날짜 recent KV 의 rise 최대/최소.
     let maxRise: number | null = null, minRise: number | null = null;
-    const rec = await c.env.CACHE.get(`resp:recent:v3:${dataset}:${scope}:${yyyymm}::300`, "json") as { deals?: { rise?: number | null }[] } | null;
+    const rec = await c.env.CACHE.get(`resp:recent:v4:${dataset}:${scope}:${yyyymm}::300`, "json") as { deals?: { rise?: number | null }[] } | null;
     for (const d of rec?.deals ?? []) {
       if (typeof d.rise === "number") {
         if (maxRise === null || d.rise > maxRise) maxRise = d.rise;
