@@ -90,9 +90,12 @@ export async function ssrTodayDeals(
   try {
     const day = date ?? kstDate();
     const ym = `${day.slice(0, 4)}${day.slice(5, 7)}`; // YYYY-MM-DD → YYYYMM
+    // 당월(신고 계속 추가·off-cycle 복구 가능)은 짧게 5분, 과거월(불변)은 30분.
+    // _v: Next Data Cache 가 deploy 넘어 durable 하게 stale 응답을 물던 문제 → URL 키 버전으로 버스트.
+    const revalidate = ym >= kstYmd() ? 300 : 1800;
     const r = await fetch(
-      `${WORKER}/api/recent?dataset=${dataset}&scope=${encodeURIComponent(scope)}&yyyymm=${ym}&limit=300&date=${day}`,
-      { next: { revalidate: 1800 } }
+      `${WORKER}/api/recent?dataset=${dataset}&scope=${encodeURIComponent(scope)}&yyyymm=${ym}&limit=300&date=${day}&_v=2`,
+      { next: { revalidate } }
     );
     if (!r.ok) return { deals: null, latest: null };
     const d = (await r.json()) as { deals?: Transaction[]; latest?: string };

@@ -8,7 +8,7 @@ import { notFound } from "next/navigation";
 import { TodayDeals } from "@/components/TodayDeals";
 import { ssrTodayDeals, ssrLatestDealDate, kstDate } from "@/lib/ssr";
 
-export const revalidate = 1800; // 일1회 데이터 → 30분 (cron 워밍이 재생성 흡수)
+export const revalidate = 300; // 당월 신고분 반영 + off-cycle 복구 빠른 치유 → 5분(ISR HIT 유지)
 export const dynamicParams = true; // prerender 안 된 조합은 첫 요청시 on-demand ISR
 
 export const metadata = {
