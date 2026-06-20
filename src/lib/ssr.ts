@@ -62,16 +62,16 @@ export async function ssrLatestDealDate(
   dataset = "aptTrade",
   scope = "all",
   ym?: string
-): Promise<string | null> {
-  const probe = async (m: string): Promise<string | null> => {
+): Promise<{ date: string; count: number } | null> {
+  const probe = async (m: string): Promise<{ date: string; count: number } | null> => {
     try {
       const r = await fetch(
         `${WORKER}/api/recent?dataset=${dataset}&scope=${encodeURIComponent(scope)}&yyyymm=${m}&limit=1`,
         { next: { revalidate: 1800 } }
       );
       if (!r.ok) return null;
-      const d = (await r.json()) as { latest?: string };
-      return d.latest || null;
+      const d = (await r.json()) as { latest?: string; latestCount?: number };
+      return d.latest ? { date: d.latest, count: d.latestCount ?? 0 } : null;
     } catch {
       return null;
     }
@@ -86,22 +86,23 @@ export async function ssrTodayDeals(
   dataset = "aptTrade",
   scope = "all",
   date?: string
-): Promise<{ deals: Transaction[] | null; latest: string | null }> {
+): Promise<{ deals: Transaction[] | null; latest: string | null; latestCount: number }> {
   try {
     const day = date ?? kstDate();
     const ym = `${day.slice(0, 4)}${day.slice(5, 7)}`; // YYYY-MM-DD → YYYYMM
     // 당월(신고 계속 추가·off-cycle 복구 가능)은 짧게 5분, 과거월(불변)은 30분.
     // _v: Next Data Cache 가 deploy 넘어 durable 하게 stale 응답을 물던 문제 → URL 키 버전으로 버스트.
+    // v3: recent 응답에 latestCount(최신일 건수) 추가 동반 버스트.
     const revalidate = ym >= kstYmd() ? 300 : 1800;
     const r = await fetch(
-      `${WORKER}/api/recent?dataset=${dataset}&scope=${encodeURIComponent(scope)}&yyyymm=${ym}&limit=300&date=${day}&_v=2`,
+      `${WORKER}/api/recent?dataset=${dataset}&scope=${encodeURIComponent(scope)}&yyyymm=${ym}&limit=300&date=${day}&_v=3`,
       { next: { revalidate } }
     );
-    if (!r.ok) return { deals: null, latest: null };
-    const d = (await r.json()) as { deals?: Transaction[]; latest?: string };
-    return { deals: d.deals ?? null, latest: d.latest || null };
+    if (!r.ok) return { deals: null, latest: null, latestCount: 0 };
+    const d = (await r.json()) as { deals?: Transaction[]; latest?: string; latestCount?: number };
+    return { deals: d.deals ?? null, latest: d.latest || null, latestCount: d.latestCount ?? 0 };
   } catch {
-    return { deals: null, latest: null };
+    return { deals: null, latest: null, latestCount: 0 };
   }
 }
 

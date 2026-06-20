@@ -37,17 +37,21 @@ export default async function Page({
   const scope = scopeOf(sido);
 
   const date = slug[0] ?? kstDate();
-  const { deals: initialDeals, latest } = await ssrTodayDeals(dataset, scope, date);
+  const { deals: initialDeals, latest, latestCount } = await ssrTodayDeals(dataset, scope, date);
 
-  // 빈 날짜(오늘은 신고 지연으로 거의 항상)면 "가장 최근 실거래일" 을 점프 타깃으로 클라에 전달.
-  // 자동 점프는 안 함 — 빈 상태 안내 + ‹ 화살표용. 보통은 위 응답의 latest 로 끝나고(추가 fetch 0),
-  // 당월 자체가 비어 latest 가 없을 때만 직전월까지 보는 폴백 프로브를 탄다.
+  // 빈 날짜(오늘은 신고 지연으로 거의 항상)면 "가장 최근 실거래일 + 건수" 를 클라에 전달.
+  // 자동 점프는 안 함 — 빈 상태 안내("N일 거래 N건") + ‹ 화살표용. 보통은 위 응답의 latest/latestCount 로
+  // 끝나고(추가 fetch 0), 당월 자체가 비어 latest 가 없을 때만 직전월까지 보는 폴백 프로브를 탄다.
   let latestDealDate: string | undefined;
+  let latestDealCount: number | undefined;
   if ((initialDeals?.length ?? 0) === 0) {
     latestDealDate = latest ?? undefined;
+    latestDealCount = latest ? latestCount : undefined;
     if (!latestDealDate) {
       const ym = `${date.slice(0, 4)}${date.slice(5, 7)}`;
-      latestDealDate = (await ssrLatestDealDate(dataset, scope, ym)) ?? undefined;
+      const probe = await ssrLatestDealDate(dataset, scope, ym);
+      latestDealDate = probe?.date;
+      latestDealCount = probe?.count;
     }
   }
 
@@ -58,6 +62,7 @@ export default async function Page({
       initialSido={sido}
       initialDate={date}
       latestDealDate={latestDealDate}
+      latestDealCount={latestDealCount}
     />
   );
 }

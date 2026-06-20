@@ -45,6 +45,11 @@ function dowOf(date: string): string {
   const [y, m, d] = date.split("-").map(Number);
   return DOW[new Date(y, m - 1, d).getDay()];
 }
+// "2026-06-20" → "6월 20일" (빈 날 안내 문구용)
+function fmtMD(date: string): string {
+  const [, m, d] = date.split("-").map(Number);
+  return `${m}월 ${d}일`;
+}
 const regionName = (sggCd: string) =>
   ALL_DISTRICTS.find((d) => d.code === sggCd)?.name ?? sggCd;
 
@@ -67,12 +72,14 @@ export function TodayDeals({
   initialSido = "전국",
   initialDate,
   latestDealDate,
+  latestDealCount,
 }: {
   initialDeals?: Transaction[] | null;
   initialDataset?: string;
   initialSido?: string;
   initialDate?: string;
   latestDealDate?: string;
+  latestDealCount?: number;
 }) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
@@ -245,12 +252,20 @@ export function TodayDeals({
               <p className="text-base text-slate-400">
                 {isToday ? "오늘 등록된 실거래가 아직 없습니다." : "이 날짜에 등록된 실거래가 없습니다."}
               </p>
+              <p className="text-xs text-slate-500">실거래는 계약 후 신고까지 보통 며칠 걸립니다.</p>
+              {latestDealCount ? (
+                <p className="text-sm text-slate-300">
+                  가장 최근 실거래일{" "}
+                  <b className="text-white">{fmtMD(latestDealDate as string)}</b>에{" "}
+                  <b className="text-blue-300">{latestDealCount.toLocaleString()}건</b>이 있어요.
+                </p>
+              ) : null}
               <button
                 onClick={() => go(latestDealDate as string, sido, dataset)}
                 onMouseEnter={() => router.prefetch(hrefFor(latestDealDate as string, sido, dataset, today))}
                 className="rounded-lg border border-blue-500/50 bg-blue-600/10 px-4 py-2 text-sm font-semibold text-blue-300 transition hover:bg-blue-600/20"
               >
-                ‹ 가장 최근 실거래일({latestDealDate})로 이동
+                ‹ {fmtMD(latestDealDate as string)} 거래{latestDealCount ? ` ${latestDealCount.toLocaleString()}건` : ""} 보기
               </button>
               <p className="text-xs text-slate-600">‹ 또는 ⬅️ 키로도 이동합니다</p>
             </>

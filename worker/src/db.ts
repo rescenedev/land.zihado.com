@@ -136,23 +136,25 @@ export async function recentDeals(
   return (results as unknown[]).map(rowToTx);
 }
 
-// 해당 월·스코프의 가장 최근 계약일(YYYY-MM-DD). 결과 없으면 null.
-// recent 가 빈 날(오늘=신고지연)일 때 "최신 실거래일" 점프 타깃을 같은 응답에 실어
-// SSR 의 별도 limit=1 프로브(직렬 워커 왕복)를 제거하기 위함.
+// 해당 월·스코프의 가장 최근 계약일(YYYY-MM-DD)과 그 날의 거래 건수. 결과 없으면 null.
+// recent 가 빈 날(오늘=신고지연)일 때 "최신 실거래일 + 건수" 를 같은 응답에 실어
+// SSR 의 별도 limit=1 프로브(직렬 워커 왕복)를 제거하고, 빈 화면 안내("N일 거래 N건")까지 채운다.
+// GROUP BY 1쿼리로 날짜·건수 동시 취득(MAX + 별도 COUNT 2쿼리 회피).
 export async function latestDealDateInMonth(
   env: Env,
   dataset: string,
   dealYmd: string,
   codes: string[] | null
-): Promise<string | null> {
-  let sql = `SELECT MAX(deal_date) AS d FROM transactions WHERE dataset=? AND deal_ymd=?`;
+): Promise<{ date: string; count: number } | null> {
+  let sql = `SELECT deal_date AS d, COUNT(*) AS n FROM transactions WHERE dataset=? AND deal_ymd=?`;
   const binds: unknown[] = [dataset, dealYmd];
   if (codes && codes.length > 0) {
     sql += ` AND sgg_cd IN (${codes.map(() => "?").join(",")})`;
     binds.push(...codes);
   }
-  const row = await env.DB.prepare(sql).bind(...binds).first<{ d: string | null }>();
-  return row?.d ?? null;
+  sql += ` GROUP BY deal_date ORDER BY deal_date DESC LIMIT 1`;
+  const row = await env.DB.prepare(sql).bind(...binds).first<{ d: string | null; n: number }>();
+  return row?.d ? { date: row.d, count: row.n ?? 0 } : null;
 }
 
 // 데이터랩 "많이산단지" — 월·스코프 내 단지별 거래건수 랭킹(GROUP BY apt_name, sgg_cd).
