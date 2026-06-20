@@ -9,6 +9,7 @@ export interface Env {
   BACKFILL_MONTHS: string;
   TELEGRAM_BOT_TOKEN?: string; // 일일 적재 상태 알림용 (secret)
   TELEGRAM_CHAT_ID?: string;   // 알림 수신 chat id (secret)
+  INSTAGRAM_TOKEN?: string;    // IG 게시 토큰 시드(secret). 갱신본은 KV ig:token 에 저장됨
 }
 
 export type BackfillJob = {

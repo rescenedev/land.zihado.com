@@ -4,6 +4,7 @@ import type { Env, BackfillJob } from "./env";
 import { SGG_CODES, recentMonths, scopeCodes, REGION_NAMES, shiftYmd } from "./regions";
 import { DATASETS, DEFAULT_DATASET, getDataset, enabledDatasets } from "./datasets";
 import { ensureMonth, ensureComplexes, handleJob, geocodeRegion } from "./ingest";
+import { postDailyTop, refreshToken } from "./instagram";
 import {
   monthlyTrend,
   searchComplexes,
@@ -71,7 +72,8 @@ function edgeTtl(url: string): number | null {
 // 응답 스키마/캐시 변경 시 bump → 기존 엣지 캐시 엔트리 자동 고아화(새 키로 재캐시).
 // v2: Transaction.extra 응답 제외(군살 제거).
 // v3: recent KV TTL 버그(당월 25h 동결) 수정 동반 — 복구 전 stale 엣지 응답 즉시 버스트.
-const CACHE_VERSION = "v3";
+// v4: 6/20 강제 재적재 후 당월 최신 거래(6/18·6/19 등) 엣지 stale 즉시 버스트.
+const CACHE_VERSION = "v4";
 
 app.use("*", async (c, next) => {
   if (c.req.method !== "GET") return next();
@@ -317,7 +319,7 @@ app.get("/api/recent", async (c) => {
   // yyyymm 은 exactDate 의 월로 이미 계산됨(위) → exactDate 라도 당월이면 짧게(오늘·최근일 신고지연 반영).
   // ⚠️ 이전 버그: exactDate 면 무조건 25h → 당월 특정일(오늘 등) latest 포인터가 하루 동결됐음.
   const recentTtl = yyyymm < curYmd() ? 7 * 24 * 3600 : 10 * 60;
-  const recentKey = `resp:recent:v4:${dataset}:${scope}:${yyyymm}:${exactDate ?? ""}:${limit}`; // v4: TTL 버그 수정 동반 버스트
+  const recentKey = `resp:recent:v5:${dataset}:${scope}:${yyyymm}:${exactDate ?? ""}:${limit}`; // v5: 강제 재적재분 KV 버스트
   const payload = await cachedJson(c.env, recentKey, recentTtl, async () => {
     const codes = scope === "all" ? null : scopeCodes(scope);
     const deals = await recentDeals(c.env, dataset, yyyymm, codes, limit, exactDate);
@@ -439,7 +441,7 @@ app.get("/api/lab/summary", async (c) => {
 
     // 최고상승·최근하락 헤드라인: 워밍된 무날짜 recent KV 의 rise 최대/최소.
     let maxRise: number | null = null, minRise: number | null = null;
-    const rec = await c.env.CACHE.get(`resp:recent:v4:${dataset}:${scope}:${yyyymm}::300`, "json") as { deals?: { rise?: number | null }[] } | null;
+    const rec = await c.env.CACHE.get(`resp:recent:v5:${dataset}:${scope}:${yyyymm}::300`, "json") as { deals?: { rise?: number | null }[] } | null;
     for (const d of rec?.deals ?? []) {
       if (typeof d.rise === "number") {
         if (maxRise === null || d.rise > maxRise) maxRise = d.rise;
@@ -1140,6 +1142,71 @@ async function notifyDaily(env: Env): Promise<void> {
   });
 }
 
+// 당월 라이브 적재 작업(전 지역×데이터셋, force, 복합 제외) — 시간별 신규 신고 탐지용.
+function buildLiveIngestJobs(): BackfillJob[] {
+  const curM = curYmd();
+  const datasets = enabledDatasets().map((d) => d.key);
+  const jobs: BackfillJob[] = [];
+  for (const sggCd of SGG_CODES)
+    for (const dataset of datasets)
+      jobs.push({ type: "trades", sggCd, dataset, dealYmd: curM, force: true });
+  return jobs;
+}
+
+// 매시간 신규 신고 탐지: 당월 누적건수 델타로 지난 1시간 신규분 파악 → (있으면) 텔레그램 통지
+// 후 다음 시간용 당월 force 재적재 enqueue. (직전 시간 enqueue분이 이번 실행 전까지 큐 처리 완료)
+const HOURLY_SNAP_KEY = "ingest:hourly:snap";
+async function hourlyIngest(env: Env): Promise<void> {
+  try {
+    const curM = curYmd();
+    const cur = await env.DB.prepare(
+      `SELECT COUNT(*) AS n, MAX(deal_date) AS latest FROM transactions WHERE deal_ymd=?`
+    ).bind(curM).first<{ n: number; latest: string }>();
+    const curCount = cur?.n ?? 0;
+    const latest = cur?.latest ?? "";
+
+    const snap = (await env.CACHE.get(HOURLY_SNAP_KEY, "json")) as { count?: number; ym?: string } | null;
+    // 월이 바뀌면 기준 리셋(델타 0). 첫 실행도 델타 0(스냅샷만 저장).
+    const prevCount = snap && snap.ym === curM ? snap.count ?? curCount : curCount;
+    const delta = curCount - prevCount;
+
+    // 다음 시간 위해 당월 force 재적재(큐 분산 → subrequest 한도 회피)
+    await enqueue(env, buildLiveIngestJobs());
+    await env.CACHE.put(HOURLY_SNAP_KEY, JSON.stringify({ count: curCount, ym: curM }));
+
+    if (delta <= 0) return; // 신규 없으면 통지 안 함(스팸 방지)
+
+    // 최신 계약일 상위 매매 3건 샘플
+    const { results } = await env.DB.prepare(
+      `SELECT apt_name, sgg_cd, (CASE WHEN deal_amount>0 THEN deal_amount ELSE deposit END) AS amt
+       FROM transactions WHERE dataset='aptTrade' AND deal_ymd=? AND deal_date=?
+       ORDER BY amt DESC LIMIT 3`
+    ).bind(curM, latest).all();
+    const fmtEok = (m: number) =>
+      m >= 10000 ? `${(m / 10000) % 1 === 0 ? m / 10000 : (m / 10000).toFixed(1)}억` : `${m.toLocaleString()}만`;
+    const sample = (results as { apt_name: string; sgg_cd: string; amt: number }[]).map((r) => {
+      const reg = REGION_NAMES[r.sgg_cd];
+      return `· ${r.apt_name}${reg ? ` (${reg.name})` : ""} ${fmtEok(r.amt)}`;
+    });
+    const text = [
+      `🆕 새 실거래 ${delta.toLocaleString()}건 신고·적재 (${curM} 누적 ${curCount.toLocaleString()}건)`,
+      `최신 계약일 ${latest}`,
+      ...sample,
+    ].join("\n");
+
+    const token = env.TELEGRAM_BOT_TOKEN;
+    const chat = env.TELEGRAM_CHAT_ID;
+    if (token && chat)
+      await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ chat_id: chat, text }),
+      });
+  } catch (e) {
+    console.error("hourlyIngest failed", e);
+  }
+}
+
 export default {
   fetch: app.fetch,
 
@@ -1174,6 +1241,12 @@ export default {
       ctx.waitUntil(enqueueComplexWarm(env)); // 단지 상세 모달 KV 워밍(당월 단지 전부, 큐 분산)
     } else if (event.cron === "0 1 * * *") {
       ctx.waitUntil(notifyDaily(env)); // 10:00 KST: 당월 적재 현황 텔레그램 통지
+    } else if (event.cron === "5 1 * * *") {
+      ctx.waitUntil(postDailyTop(env)); // 10:05 KST: 오늘의 주목 실거래 TOP IG 게시
+    } else if (event.cron === "10 1 * * 1") {
+      ctx.waitUntil(refreshToken(env)); // 월요일 10:10 KST: IG 장기토큰(60일) 갱신
+    } else if (event.cron === "0 * * * *") {
+      ctx.waitUntil(hourlyIngest(env)); // 매시간 정각: 신규 신고 탐지·적재 + 텔레그램
     } else {
       ctx.waitUntil(enqueue(env, buildBackfillJobs(2)));
       ctx.waitUntil(warmCore());              // 대시보드/통계/오늘의실거래 전국·서울 30일
