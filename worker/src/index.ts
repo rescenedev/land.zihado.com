@@ -73,7 +73,8 @@ function edgeTtl(url: string): number | null {
 // v2: Transaction.extra 응답 제외(군살 제거).
 // v3: recent KV TTL 버그(당월 25h 동결) 수정 동반 — 복구 전 stale 엣지 응답 즉시 버스트.
 // v4: 6/20 강제 재적재 후 당월 최신 거래(6/18·6/19 등) 엣지 stale 즉시 버스트.
-const CACHE_VERSION = "v4";
+// v5: 지역상세/단지상세 당월 25h→30m TTL 수정 동반 — 12h 엣지에 남은 동결 엔트리 즉시 버스트.
+const CACHE_VERSION = "v5";
 
 app.use("*", async (c, next) => {
   if (c.req.method !== "GET") return next();
@@ -120,7 +121,11 @@ function shiftDays(daysAgo: number): string {
 
 function respTtl(yyyymm: string, now = new Date()): number {
   const cur = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, "0")}`;
-  return yyyymm >= cur ? 60 * 60 * 25 : 60 * 60 * 24 * 7; // 당월 25시간(일1회 cron 워밍 주기>24h 보장) / 과거 7일
+  // ⚠️ 당월은 매시간 force 적재로 D1 이 계속 늘어난다. 이전 25시간 TTL 은 지역상세(resp:tx)·
+  //    단지상세(resp:complex) 응답을 일1회 cron 워밍 시점에 동결시켜, 새 신고가 '오늘의 실거래'(recent,
+  //    10분 TTL)엔 떠도 지역/단지 화면엔 최대 25시간 안 뜨는 버그를 유발했다. warmAfterIngest 의 재워밍도
+  //    KV 히트 단락(if kvHit return) 때문에 동결 엔트리를 그대로 읽어 무효였음. 30분으로 staleness 상한.
+  return yyyymm >= cur ? 60 * 30 : 60 * 60 * 24 * 7; // 당월 30분(매시간 신규신고 반영) / 과거 7일
 }
 
 // SubscriptionError → 403, 그 외 → 500 으로 일관 처리
@@ -471,11 +476,14 @@ app.get("/api/transactions", async (c) => {
   if (!RE_SGG.test(region)) return c.json({ error: "region(5자리) 필요" }, 400);
   if (!RE_YMD.test(yyyymm)) return c.json({ error: "yyyymm(YYYYMM) 필요" }, 400);
 
-  const txKey = `resp:tx:v3:${dataset}:${region}:${yyyymm}`;
+  const txKey = `resp:tx:v4:${dataset}:${region}:${yyyymm}`; // v4: 당월 30분 TTL 동반 KV 버스트
 
   // KV 히트 → ingestedMonths D1 쿼리 완전 스킵 (가장 빠른 경로)
   const kvHit = await c.env.CACHE.get(txKey, "json");
-  if (kvHit) return c.json({ ...(kvHit as object), filling: false });
+  if (kvHit)
+    return c.json({ ...(kvHit as object), filling: false }, 200, {
+      "Cache-Control": `public, max-age=${respTtl(yyyymm)}`, // 당월=30분 → 엣지도 동결 안 됨
+    });
 
   // KV 미스: 적재 여부 확인 → 미적재면 큐 enqueue + filling 즉시 응답
   const have = await ingestedMonths(c.env, dataset, region);
@@ -527,7 +535,9 @@ app.get("/api/transactions", async (c) => {
       return { dataset, region, yyyymm, source, count: items.length, items };
     }
   );
-  return c.json({ ...payload, filling: false });
+  return c.json({ ...payload, filling: false }, 200, {
+    "Cache-Control": `public, max-age=${respTtl(yyyymm)}`,
+  });
 });
 
 // 월별 집계 통계
@@ -541,7 +551,7 @@ app.get("/api/stats", async (c) => {
 
   const payload = await cachedJson(
     c.env,
-    `resp:stats1:${dataset}:${region}:${yyyymm}`,
+    `resp:stats2:${dataset}:${region}:${yyyymm}`, // v2: 당월 30분 TTL 동반 KV 버스트
     respTtl(yyyymm),
     async () => {
       const { rows } = await ensureMonth(c.env, dataset, region, yyyymm);
@@ -560,7 +570,7 @@ app.get("/api/stats", async (c) => {
       return { dataset, region, yyyymm, stats };
     }
   );
-  return c.json(payload);
+  return c.json(payload, 200, { "Cache-Control": `public, max-age=${respTtl(yyyymm)}` });
 });
 
 // 다월 추이 (D1 집계). 범위 내 누락 월은 즉시 적재 후 집계.
@@ -585,7 +595,11 @@ app.get("/api/transactions/range", async (c) => {
     );
   }
   const trend = await monthlyTrend(c.env, dataset, region, from, to, apt);
-  return c.json({ dataset, region, from, to, apt: apt ?? null, trend, filling: missing.length });
+  // range 는 KV 캐시 없이 D1 직집계라 워커는 항상 신선 — 단 엣지 기본 12h 가 당월 추이바를 동결.
+  // to(최신월) 기준 TTL 로 당월이면 30분만 엣지 캐시.
+  return c.json({ dataset, region, from, to, apt: apt ?? null, trend, filling: missing.length }, 200, {
+    "Cache-Control": `public, max-age=${respTtl(to)}`,
+  });
 });
 
 // 지도 단지 레이어: 한 시군구의 단지별 좌표+가격 (줌인 시 사용). 좌표는 캐시 후 지오코딩.
@@ -601,7 +615,7 @@ app.get("/api/aptmap", async (c) => {
   const fromYmd = shiftYmd(yyyymm, -11);
 
   // KV 응답 캐시: 지오코딩 결과가 안정적이면 재활용 (줌인 반복 시 즉시 응답). v2=12개월 윈도우.
-  const aptmapKey = `resp:aptmap:v3:${dataset}:${region}:${fromYmd}-${yyyymm}`;
+  const aptmapKey = `resp:aptmap:v4:${dataset}:${region}:${fromYmd}-${yyyymm}`; // v4: 당월 30분 TTL 동반 KV 버스트
   const kvHit = await c.env.CACHE.get(aptmapKey, "json");
   // KV 히트 = 지오코딩 안정된 엔트리(좌표 불변) → 일1회 데이터 주기로 길게 캐시(s-maxage=300
   // 5분 revalidation 폭주 제거, p99 꼬리 완화). SWR 7일이라 만료돼도 stale 즉시.
@@ -703,7 +717,7 @@ app.get("/api/complex", async (c) => {
   // KV 응답 캐시 (단지 이력은 같은 키로 자주 재조회됨)
   const payload = await cachedJson(
     c.env,
-    `resp:complex:${dataset}:${region}:${apt}:${from}:${to}`,
+    `resp:complex:v2:${dataset}:${region}:${apt}:${from}:${to}`, // v2: 당월 30분 TTL 동반 KV 버스트
     respTtl(to),
     async () => {
       const rows = await complexDeals(c.env, dataset, region, apt, from, to);
@@ -716,7 +730,9 @@ app.get("/api/complex", async (c) => {
       return { region, apt, from, to, count: deals.length, deals };
     }
   );
-  return c.json({ ...payload, filling: missing.length });
+  return c.json({ ...payload, filling: missing.length }, 200, {
+    "Cache-Control": `public, max-age=${respTtl(to)}`,
+  });
 });
 
 // 펀팩트: 좌표 주변 시설(관공서/경찰/소방/학교/스타벅스/올리브영/다이소) + 가장 가까운 지하철역
